@@ -96,6 +96,7 @@ from __future__ import annotations
 
 import abc
 import os
+from pathlib import Path
 import pkgutil
 import re
 import logging
@@ -375,7 +376,7 @@ class LintCheck(metaclass=LintCheckMeta):
             start_line = end_line = line or 0
 
         if not fname:
-            fname = recipe.path
+            fname = os.fspath(recipe.path)
 
         return LintMessage(
             recipe=recipe,
@@ -505,7 +506,7 @@ class Linter:
     def __init__(
         self,
         config: dict,
-        recipe_folder: str,
+        recipe_folder: Path,
         exclude: list[str] | None = None,
         nocatch: bool = False,
     ) -> None:
@@ -618,9 +619,9 @@ class Linter:
           List of collected messages
         """
         try:
-            recipe = _recipe.Recipe.from_file(self.recipe_folder, recipe_name)
+            recipe = _recipe.Recipe.from_file(self.recipe_folder, Path(recipe_name))
         except _recipe.RecipeError as exc:
-            recipe = _recipe.Recipe(recipe_name, self.recipe_folder)
+            recipe = _recipe.Recipe(Path(recipe_name), self.recipe_folder)
             check_cls = recipe_error_to_lint_check.get(exc.__class__, linter_failure)
             return [check_cls.make_message(recipe=recipe, line=getattr(exc, "line"))]
 

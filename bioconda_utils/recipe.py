@@ -163,14 +163,17 @@ class Recipe:
         "cdt": lambda x: x,
     }
 
-    def __init__(self, recipe_dir, recipe_folder):
-        if not recipe_dir.startswith(recipe_folder):
-            raise RuntimeError(f"'{recipe_dir}' not inside '{recipe_folder}'")
+    def __init__(self, recipe_dir: Path, recipe_folder: Path):
+        recipe_path = recipe_dir
+        try:
+            relative_dir = recipe_path.relative_to(recipe_folder)
+        except ValueError as exc:
+            raise RuntimeError(f"'{recipe_path}' not inside '{recipe_folder}'") from exc
 
         #: path to folder containing recipes
-        self.basedir = recipe_folder
+        self.basedir: Path = recipe_folder
         #: relative path to recipe dir from folder containing recipes
-        self.reldir = recipe_dir[len(recipe_folder) :].strip("/")
+        self.reldir = os.fspath(relative_dir)
 
         # Filled in by render()
         #: Parsed recipe YAML
@@ -196,19 +199,19 @@ class Recipe:
         self._conda_tempdir = None
 
     @property
-    def path(self):
+    def path(self) -> Path:
         """Full path to ``meta.yaml``"""
-        return os.path.join(self.basedir, self.reldir, "meta.yaml")
+        return self.basedir / self.reldir / "meta.yaml"
 
     @property
-    def relpath(self):
+    def relpath(self) -> Path:
         """Relative path to ``meta.yaml`` (from ``basedir``)"""
-        return os.path.join(self.reldir, "meta.yaml")
+        return Path(self.reldir) / "meta.yaml"
 
     @property
-    def dir(self):
+    def dir(self) -> Path:
         """Path to recipe folder"""
-        return os.path.join(self.basedir, self.reldir)
+        return self.basedir / self.reldir
 
     def __str__(self) -> str:
         return self.reldir
@@ -253,18 +256,24 @@ class Recipe:
     @classmethod
     @overload
     def from_file(
-        cls, recipe_dir, recipe_fname, return_exceptions: Literal[False] = False
+        cls,
+        recipe_dir: Path,
+        recipe_fname: Path,
+        return_exceptions: Literal[False] = False,
     ) -> Recipe: ...
 
     @classmethod
     @overload
     def from_file(
-        cls, recipe_dir, recipe_fname, return_exceptions: Literal[True]
+        cls,
+        recipe_dir: Path,
+        recipe_fname: Path,
+        return_exceptions: Literal[True],
     ) -> Recipe | Exception: ...
 
     @classmethod
     def from_file(
-        cls, recipe_dir, recipe_fname, return_exceptions=False
+        cls, recipe_dir: Path, recipe_fname: Path, return_exceptions=False
     ) -> Recipe | Exception:
         """Create new `Recipe` object from file
 
@@ -272,11 +281,11 @@ class Recipe:
            recipe_dir: Path to recipes folder
            recipe_fname: Relative path to recipe (folder or meta.yaml)
         """
-        if recipe_fname.endswith("meta.yaml"):
-            recipe_fname = os.path.dirname(recipe_fname)
+        if recipe_fname.name == "meta.yaml":
+            recipe_fname = recipe_fname.parent
         recipe = cls(recipe_fname, recipe_dir)
         try:
-            with open(os.path.join(recipe_fname, "meta.yaml")) as text:
+            with open(recipe_fname / "meta.yaml") as text:
                 recipe.load_from_string(text.read())
         except FileNotFoundError:
             exc = MissingMetaYaml(recipe_fname)

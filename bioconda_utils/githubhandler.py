@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+from pathlib import Path
 import logging
 
 from copy import copy
@@ -83,7 +84,7 @@ class GitHubHandler:
     def create_api_object(self, *args, **kwargs):
         """Create API object"""
 
-    def get_file_relurl(self, path: str, branch_name: str = "master") -> str:
+    def get_file_relurl(self, path: Path, branch_name: str = "master") -> str:
         """Format domain relative url for **path** on **branch_name**"""
         return "/{user}/{repo}/tree/{branch_name}/{path}".format(
             branch_name=branch_name, path=path, **self.var_default

@@ -1,4 +1,5 @@
 import os.path as op
+from pathlib import Path
 from ruamel.yaml import YAML
 
 import glob
@@ -32,7 +33,7 @@ TEST_CASE_IDS = list(TEST_DATA.keys())
 def linter(config_file, recipes_folder):
     """Prepares a linter given config_folder and recipes_folder"""
     config = utils.load_config(config_file)
-    yield lint.Linter(config, str(recipes_folder), nocatch=True)
+    yield lint.Linter(config, Path(recipes_folder), nocatch=True)
 
 
 @pytest.mark.parametrize("case", TEST_CASES, ids=TEST_CASE_IDS)

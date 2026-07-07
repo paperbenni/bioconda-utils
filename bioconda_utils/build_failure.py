@@ -5,6 +5,7 @@ from collections.abc import Iterator
 import subprocess as sp
 import logging
 from hashlib import sha256
+from pathlib import Path
 
 import ruamel.yaml
 import ruamel.yaml.reader
@@ -230,7 +231,7 @@ class BuildFailureRecord:
 
 
 def collect_build_failure_dataframe(
-    recipe_folder: str,
+    recipe_folder: Path,
     config: dict[str, Any],
     channel: str,
     link_fmt: str = "txt",

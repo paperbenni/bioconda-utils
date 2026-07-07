@@ -127,7 +127,7 @@ def test_recipe_selection_uses_range_base_and_ref(monkeypatch):
 
     class Repo:
         def __init__(self, recipe_folder):
-            assert recipe_folder == "recipes"
+            assert recipe_folder == Path("recipes")
 
         def get_recipes_to_build(self, ref, base):
             calls.append((ref, base))

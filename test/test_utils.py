@@ -494,7 +494,7 @@ def test_conda_as_dep(config_fixture, mulled_build_and_test):
     )
     r.write_recipes()
     build_result = build.build_recipes(
-        r.basedir,
+        Path(r.basedir),
         config_fixture,
         r.recipe_dirnames,
         testonly=False,
@@ -880,7 +880,7 @@ def test_skip_dependencies(config_fixture):
             ensure_missing(pkg)
 
     build.build_recipes(
-        r.basedir,
+        Path(r.basedir),
         config_fixture,
         r.recipe_dirnames,
         testonly=False,
@@ -1016,7 +1016,7 @@ def test_bioconda_pins(caplog, config_fixture):
     )
     r.write_recipes()
     build_result = build.build_recipes(
-        r.basedir,
+        Path(r.basedir),
         config_fixture,
         r.recipe_dirnames,
         testonly=False,
@@ -1122,7 +1122,7 @@ def test_native_platform_skipping(config_fixture):
         recipe_folder = os.path.dirname(r.recipe_dirs[recipe_name])
         assert (
             build.should_skip_platform(
-                recipe_folder, r.recipe_dirs[recipe_name], PackageSubdir(platform)
+                Path(recipe_folder), r.recipe_dirs[recipe_name], PackageSubdir(platform)
             )
             == result
         )
@@ -1206,7 +1206,7 @@ def test_cb3_outputs(config_fixture):
     r.recipe_dirs["one"]
 
     build_result = build.build_recipes(
-        r.basedir,
+        Path(r.basedir),
         config_fixture,
         r.recipe_dirnames,
         testonly=False,
@@ -1242,7 +1242,7 @@ def test_compiler(config_fixture):
     )
     r.write_recipes()
     build_result = build.build_recipes(
-        r.basedir,
+        Path(r.basedir),
         config_fixture,
         r.recipe_dirnames,
         testonly=False,
@@ -1316,7 +1316,7 @@ def test_nested_recipes(config_fixture):
     r.write_recipes()
 
     build_results = build.build_recipes(
-        r.basedir,
+        Path(r.basedir),
         config_fixture,
         r.recipe_dirnames,
         testonly=False,
@@ -1366,7 +1366,7 @@ def test_conda_build_sysroot(config_fixture):
     )
     r.write_recipes()
     build_result = build.build_recipes(
-        r.basedir,
+        Path(r.basedir),
         config_fixture,
         r.recipe_dirnames,
         testonly=False,
@@ -1415,7 +1415,7 @@ def test_skip_unsatisfiable_pin_compatible(config_fixture):
     )
     r.write_recipes()
     build_result = build.build_recipes(
-        r.basedir,
+        Path(r.basedir),
         config_fixture,
         [r.recipe_dirs["one"]],
         testonly=False,
@@ -1486,7 +1486,7 @@ def test_pkg_test_conda_package_format(
             build_script_template=build_script_template,
         )
     build_result = build.build_recipes(
-        r.basedir,
+        Path(r.basedir),
         config_fixture,
         r.recipe_dirnames,
         docker_builder=docker_builder,
@@ -1558,7 +1558,7 @@ def test_build_recipes_normalizes_raw_config_at_boundary(monkeypatch):
     monkeypatch.setattr(build, "Skiplist", observe_config)
 
     with pytest.raises(NormalizationObserved):
-        build.build_recipes("recipes", {"channels": []}, ["example"])
+        build.build_recipes(Path("recipes"), {"channels": []}, ["example"])
 
 
 def test_load_config_registers_config_after_resolving_paths(monkeypatch, tmp_path):

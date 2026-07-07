@@ -226,7 +226,7 @@ def get_recipes_to_build(git_range: GitRange, recipe_folder: Path) -> list[str]:
       List of recipes for which meta.yaml or build.sh was modified or
       which were unblacklisted.
     """
-    repo = BiocondaRepo(str(recipe_folder))
+    repo = BiocondaRepo(recipe_folder)
     return repo.get_recipes_to_build(git_range.ref, git_range.base)
 
 
@@ -244,29 +244,28 @@ def get_recipes(
     removes blacklisted recipes (unless include_blacklisted=True).
 
     """
-    recipe_folder_str = str(recipe_folder)
-    recipes = list(utils.get_recipes(recipe_folder_str, packages))
+    recipes = list(utils.get_recipes(recipe_folder, packages))
     logger.info(
         "Considering total of %s recipes%s.",
         len(recipes),
-        utils.ellipsize_recipes(recipes, recipe_folder_str),
+        utils.ellipsize_recipes(recipes, recipe_folder),
     )
     if git_range:
         changed_recipes = get_recipes_to_build(git_range, recipe_folder)
         logger.info(
             "Constraining to %s git modified recipes%s.",
             len(changed_recipes),
-            utils.ellipsize_recipes(changed_recipes, recipe_folder_str),
+            utils.ellipsize_recipes(changed_recipes, recipe_folder),
         )
         recipes = [recipe for recipe in recipes if recipe in set(changed_recipes)]
         if len(recipes) != len(changed_recipes):
             logger.info(
                 "Overlap was %s recipes%s.",
                 len(recipes),
-                utils.ellipsize_recipes(recipes, recipe_folder_str),
+                utils.ellipsize_recipes(recipes, recipe_folder),
             )
     if not include_blacklisted:
-        skiplist = Skiplist(config, recipe_folder_str)
+        skiplist = Skiplist(config, recipe_folder)
         all_len = len(recipes)
         recipes = [recipe for recipe in recipes if not skiplist.is_skiplisted(recipe)]
         if all_len > len(recipes):
@@ -274,7 +273,7 @@ def get_recipes(
     logger.info(
         "Processing %s recipes%s.",
         len(recipes),
-        utils.ellipsize_recipes(recipes, recipe_folder_str),
+        utils.ellipsize_recipes(recipes, recipe_folder),
     )
     return recipes
 
@@ -587,7 +586,7 @@ def build(
         logger.warning("--lint-exclude has no effect unless --lint is specified.")
     label = os.getenv("BIOCONDA_LABEL", None) or None
     success = build_recipes(
-        str(recipe_folder),
+        recipe_folder,
         cfg,
         recipes,
         testonly=test_only,
@@ -796,7 +795,7 @@ def lint(
             parsed_git_range,
             include_blacklisted=True,
         )
-        linter = _lint.Linter(config_data, str(recipe_folder), exclude)
+        linter = _lint.Linter(config_data, recipe_folder, exclude)
         result = linter.lint(recipes, fix=try_fix)
         messages = linter.get_messages()
         if messages:
@@ -978,7 +977,7 @@ def update_pinning(
             utils.RepoData().set_cache(cache)
         utils.RepoData().df
         build_config = utils.load_conda_build_config()
-        skiplist = Skiplist(config_data, str(recipe_folder))
+        skiplist = Skiplist(config_data, recipe_folder)
         from . import recipe
 
         dag = graph.build_from_recipes(
@@ -1360,7 +1359,6 @@ def autobump(
     package_patterns: PackagePatterns = packages or "*"
     excluded_channels = exclude_channels or ["conda-forge"]
     use_default_signing_key = sign and sign_key is None
-    recipe_folder_str = str(recipe_folder)
     try:
         # load and register config
         config_dict = utils.load_config(config)
@@ -1370,11 +1368,11 @@ def autobump(
 
         if no_follow_graph:
             recipe_source = autobump.RecipeSource(
-                recipe_folder_str, package_patterns, exclude or [], not no_shuffle
+                recipe_folder, package_patterns, exclude or [], not no_shuffle
             )
         else:
             recipe_source = autobump.RecipeGraphSource(
-                recipe_folder_str,
+                recipe_folder,
                 package_patterns,
                 exclude or [],
                 not no_shuffle,
@@ -1412,7 +1410,7 @@ def autobump(
         if check_branch or create_branch or create_pr or only_active:
             # We need to take the recipe from the git repo. This
             # loads the bump/<recipe> branch if available
-            git_handler = BiocondaRepo(recipe_folder_str, dry_run)
+            git_handler = BiocondaRepo(recipe_folder, dry_run)
             git_handler.checkout_master()
             if only_active:
                 scanner.add(autobump.ExcludeNoActiveUpdate, git_handler)
@@ -1761,7 +1759,7 @@ def list_build_failures(
     config_data = utils.load_config(config)
     parsed_git_range = _parse_git_range(git_range) if git_range is not None else None
     df = collect_build_failure_dataframe(
-        str(recipe_folder),
+        recipe_folder,
         config_data,
         channel,
         link_fmt=output_format,

@@ -327,7 +327,7 @@ def setup_logger(
 
 
 def ellipsize_recipes(
-    recipes: Collection[str], recipe_folder: str, n: int = 5, m: int = 50
+    recipes: Collection[str], recipe_folder: Path, n: int = 5, m: int = 50
 ) -> str:
     """Logging helper showing recipe list
 
@@ -349,7 +349,10 @@ def ellipsize_recipes(
         append = ""
     return (
         " ("
-        + ", ".join(recipe.replace(recipe_folder, "").lstrip("/") for recipe in recipes)
+        + ", ".join(
+            recipe.replace(os.fspath(recipe_folder), "").lstrip("/")
+            for recipe in recipes
+        )
         + append
         + ")"
     )

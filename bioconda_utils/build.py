@@ -434,7 +434,7 @@ def get_worker_subdag(
 
 
 def should_skip_platform(
-    recipe_folder: str, recipe: str, platform: PackageSubdir
+    recipe_folder: Path, recipe: str, platform: PackageSubdir
 ) -> bool:
     """
     Return True if *platform* is a non-primary subdir (``linux-aarch64``,
@@ -447,7 +447,7 @@ def should_skip_platform(
     every recipe would be attempted on every non-x86_64 builder, wasting time
     on recipes that have not been verified for that platform.
     """
-    recipe_obj = _recipe.Recipe.from_file(recipe_folder, recipe)
+    recipe_obj = _recipe.Recipe.from_file(recipe_folder, Path(recipe))
     primary_platforms = {PackageSubdir.LINUX_64, PackageSubdir.OSX_64}
     additional_platforms = set(ALL_PACKAGE_SUBDIRS) - primary_platforms
     return (
@@ -457,7 +457,7 @@ def should_skip_platform(
 
 
 def build_recipes(
-    recipe_folder: str,
+    recipe_folder: Path,
     config: dict[str, Any],
     recipes: list[str],
     mulled_build_and_test: bool = True,

@@ -124,7 +124,7 @@ class RecipeSource:
 
     def __init__(
         self,
-        recipe_base: str,
+        recipe_base: Path,
         packages: str | list[str],
         exclude: list[str],
         shuffle: bool = True,
@@ -161,7 +161,7 @@ class RecipeSource:
 class RecipeGraphSource(RecipeSource):
     def __init__(
         self,
-        recipe_base: str,
+        recipe_base: Path,
         packages: str | list[str],
         exclude: list[str],
         shuffle: bool,
@@ -406,7 +406,7 @@ class ExcludeBlacklisted(Filter):
         level = logging.DEBUG
 
     def __init__(
-        self, scanner: Scanner, recipe_base: str, config: dict[str, Any]
+        self, scanner: Scanner, recipe_base: Path, config: dict[str, Any]
     ) -> None:
         super().__init__(scanner)
         self.blacklists = config.get("blacklists")

@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import BinaryIO, Protocol
 
 import git
@@ -199,7 +200,7 @@ class GitHandlerBase:
 
         return remotes[0]
 
-    async def branch_is_current(self, branch, path: str, master="master") -> bool:
+    async def branch_is_current(self, branch, path: Path, master="master") -> bool:
         """Checks if **branch** is missing any commits to **path**
         as compared to **master**"""
         # proc = await asyncio.create_subprocess_exec(
@@ -400,7 +401,7 @@ class GitHandlerBase:
         branch.checkout()
 
     def commit_and_push_changes(
-        self, files: list[str], branch_name: str, msg: str, sign=False
+        self, files: list[Path], branch_name: str, msg: str, sign=False
     ) -> bool:
         """Create recipe commit and pushes to upstream remote
 
@@ -563,7 +564,7 @@ class GitHandler(GitHandlerBase):
 
     def __init__(
         self,
-        folder: str = ".",
+        folder: Path = Path("."),
         dry_run=False,
         home="bioconda/bioconda-recipes",
         fork=None,

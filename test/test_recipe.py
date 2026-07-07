@@ -1,5 +1,6 @@
 import os.path as op
 import os
+from pathlib import Path
 
 import pytest
 
@@ -66,7 +67,7 @@ RECIPES = yaml.load(RECIPE_DATA)
 def recipes(recipe_dirs, recipes_folder):
     recipes = []
     for recipe_dir in recipe_dirs:
-        recipes.append(Recipe.from_file(str(recipes_folder), str(recipe_dir)))
+        recipes.append(Recipe.from_file(Path(recipes_folder), Path(recipe_dir)))
     yield recipes
 
 
@@ -76,29 +77,29 @@ def with_recipes(func):
 
 
 def test_stub():
-    r = Recipe("recipes/sina", "recipes/")
-    assert r.path == "recipes/sina/meta.yaml"
-    assert r.relpath == "sina/meta.yaml"
+    r = Recipe(Path("recipes/sina"), Path("recipes/"))
+    assert r.path == Path("recipes/sina/meta.yaml")
+    assert r.relpath == Path("sina/meta.yaml")
     assert r.reldir == "sina"
     assert str(r) == "sina"
 
 
 def test_empty_recipe(tmpdir):
-    r = Recipe("recipes/sina", "recipes/")
+    r = Recipe(Path("recipes/sina"), Path("recipes/"))
     with pytest.raises(EmptyRecipe):
         r.load_from_string("")
     with open(op.join(tmpdir, "meta.yaml"), "w"):
         pass
     with pytest.raises(EmptyRecipe):
-        Recipe.from_file(str(tmpdir), str(tmpdir))
-    res = Recipe.from_file(str(tmpdir), str(tmpdir), return_exceptions=True)
+        Recipe.from_file(Path(tmpdir), Path(tmpdir))
+    res = Recipe.from_file(Path(tmpdir), Path(tmpdir), return_exceptions=True)
     assert isinstance(res, EmptyRecipe)
 
 
 def test_file_not_found():
     with pytest.raises(MissingMetaYaml):
-        Recipe.from_file("/", "/doesnotexist")
-    res = Recipe.from_file("/", "/doesnotexist", return_exceptions=True)
+        Recipe.from_file(Path("/"), Path("/doesnotexist"))
+    res = Recipe.from_file(Path("/"), Path("/doesnotexist"), return_exceptions=True)
     assert isinstance(res, MissingMetaYaml)
 
 

@@ -12,7 +12,7 @@ format:
 
 # Symlink the CLI into ~/.local/bin for global access.
 # This way the CLI can find its conda deps at runtime.
-install:
+global-install:
     pixi run global-install
 
 # Use when testing bioconda-utils against an unpublished Galaxy change, such

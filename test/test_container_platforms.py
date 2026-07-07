@@ -110,9 +110,9 @@ def test_handle_merged_pr_fallback_rejects_container_platform_mismatch(
     with pytest.raises(ValueError, match="linux-aarch64 packages require linux/arm64"):
         cli.handle_merged_pr(
             str(recipe_folder),
-            str(config),
+            config,
             repo="bioconda/bioconda-recipes",
-            git_range=["base", "head"],
+            git_range="base...head",
             package_platform="linux-aarch64",
             container_platform=["linux/amd64"],
         )

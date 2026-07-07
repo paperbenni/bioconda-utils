@@ -248,7 +248,7 @@ def single_upload(request):
     request.addfinalizer(lambda: ensure_missing(pkg))
 
     build_result = build.build(
-        recipe=r.recipe_dirs[name],
+        recipe=Path(r.recipe_dirs[name]),
         pkg_paths=r.pkgs[name],
         docker_builder=None,
         mulled_build_and_test=False,
@@ -772,7 +772,7 @@ def test_rendering_sandboxing():
         with pytest.raises(sp.CalledProcessError) as excinfo:
             pkg_paths = utils.built_package_paths(r.recipe_dirs["one"])
             build.build(
-                recipe=r.recipe_dirs["one"],
+                recipe=Path(r.recipe_dirs["one"]),
                 pkg_paths=pkg_paths,
                 mulled_build_and_test=False,
                 raise_error=True,
@@ -783,7 +783,7 @@ def test_rendering_sandboxing():
         with pytest.raises(exceptions.CondaBuildUserError) as excinfo:
             pkg_paths = utils.built_package_paths(r.recipe_dirs["one"])
             build.build(
-                recipe=r.recipe_dirs["one"],
+                recipe=Path(r.recipe_dirs["one"]),
                 pkg_paths=pkg_paths,
                 mulled_build_and_test=False,
             )
@@ -830,7 +830,7 @@ def test_env_sandboxing():
 
     with utils.temp_env({"GITHUB_TOKEN": "token_here"}):
         build.build(
-            recipe=r.recipe_dirs["one"],
+            recipe=Path(r.recipe_dirs["one"]),
             pkg_paths=pkg_paths,
             mulled_build_and_test=False,
         )
@@ -935,7 +935,7 @@ def test_build_empty_extra_container():
     pkgs = utils.built_package_paths(r.recipe_dirs["one"])
 
     build_result = build.build(
-        recipe=r.recipe_dirs["one"],
+        recipe=Path(r.recipe_dirs["one"]),
         pkg_paths=pkgs,
         mulled_build_and_test=True,
     )
@@ -983,7 +983,7 @@ def test_build_container_no_default_gcc(tmpdir):
 
     pkg_paths = utils.built_package_paths(r.recipe_dirs["one"])
     build_result = build.build(
-        recipe=r.recipe_dirs["one"],
+        recipe=Path(r.recipe_dirs["one"]),
         pkg_paths=pkg_paths,
         docker_builder=docker_builder,
         mulled_build_and_test=False,
@@ -1122,7 +1122,9 @@ def test_native_platform_skipping(config_fixture):
         recipe_folder = os.path.dirname(r.recipe_dirs[recipe_name])
         assert (
             build.should_skip_platform(
-                Path(recipe_folder), r.recipe_dirs[recipe_name], PackageSubdir(platform)
+                Path(recipe_folder),
+                Path(r.recipe_dirs[recipe_name]),
+                PackageSubdir(platform),
             )
             == result
         )
@@ -1325,7 +1327,7 @@ def test_nested_recipes(config_fixture):
     )
     assert build_results
 
-    assert len(list(utils.get_recipes(r.basedir))) == 4
+    assert len(list(utils.get_recipes(Path(r.basedir)))) == 4
 
     for k, v in r.recipe_dirs.items():
         for i in utils.built_package_paths(v):
@@ -1417,7 +1419,7 @@ def test_skip_unsatisfiable_pin_compatible(config_fixture):
     build_result = build.build_recipes(
         Path(r.basedir),
         config_fixture,
-        [r.recipe_dirs["one"]],
+        [Path(r.recipe_dirs["one"])],
         testonly=False,
         force=False,
         mulled_build_and_test=False,
@@ -1558,7 +1560,7 @@ def test_build_recipes_normalizes_raw_config_at_boundary(monkeypatch):
     monkeypatch.setattr(build, "Skiplist", observe_config)
 
     with pytest.raises(NormalizationObserved):
-        build.build_recipes(Path("recipes"), {"channels": []}, ["example"])
+        build.build_recipes(Path("recipes"), {"channels": []}, [Path("example")])
 
 
 def test_load_config_registers_config_after_resolving_paths(monkeypatch, tmp_path):

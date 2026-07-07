@@ -11,16 +11,16 @@ class Skiplist:
         for p in config.get("blacklists", []):
             self.global_list.update(
                 [
-                    self._get_reldir(i.strip())
+                    self._get_reldir(Path(i.strip()))
                     for i in open(p, encoding="utf8")
                     if not i.startswith("#") and i.strip()
                 ]
             )
 
-    def _get_reldir(self, recipe_path: str) -> str:
+    def _get_reldir(self, recipe_path: Path) -> str:
         return os.path.relpath(recipe_path, self.recipe_folder)
 
-    def is_skiplisted(self, recipe: str | Recipe) -> bool:
+    def is_skiplisted(self, recipe: Path | Recipe) -> bool:
         from bioconda_utils.build_failure import BuildFailureRecord
 
         if isinstance(recipe, Recipe):

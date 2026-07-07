@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 from textwrap import dedent
 import subprocess as sp
 
@@ -58,7 +59,7 @@ def build_pkg(request):
         for pkg in built_packages:
             ensure_missing(pkg)
         build.build(
-            recipe=recipe_dir,
+            recipe=Path(recipe_dir),
             pkg_paths=built_packages,
             mulled_build_and_test=mulled_build_and_test,
             docker_builder=docker_builder,

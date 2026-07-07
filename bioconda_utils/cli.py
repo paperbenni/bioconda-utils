@@ -71,7 +71,7 @@ logger = logging.getLogger(__name__)
 # `recipes/bowtie` or `recipes/bowtie/1.0.1`.
 
 LogLevel = Literal["debug", "info", "warning", "error", "critical"]
-PackagePatterns = str | list[str]
+PackagePatterns = list[str]
 
 # Shared CLI parameter type aliases
 
@@ -257,7 +257,7 @@ MulledUploadRecordsOpt = Annotated[
 ]
 
 
-def get_recipes_to_build(git_range: GitRange, recipe_folder: Path) -> list[str]:
+def get_recipes_to_build(git_range: GitRange, recipe_folder: Path) -> list[Path]:
     """Gets list of modified recipes according to git_range and blacklist
 
     See `BiocondaRepoMixin.get_recipes_to_build()`.
@@ -269,7 +269,10 @@ def get_recipes_to_build(git_range: GitRange, recipe_folder: Path) -> list[str]:
       which were unblacklisted.
     """
     repo = BiocondaRepo(recipe_folder)
-    return repo.get_recipes_to_build(git_range.ref, git_range.base)
+    return [
+        Path(recipe)
+        for recipe in repo.get_recipes_to_build(git_range.ref, git_range.base)
+    ]
 
 
 def get_recipes(
@@ -278,7 +281,7 @@ def get_recipes(
     packages: PackagePatterns,
     git_range: GitRange | None,
     include_blacklisted: bool = False,
-) -> list[str]:
+) -> list[Path]:
     """Gets list of paths to recipe folders to be built
 
     Considers all recipes matching globs in packages, constrains to
@@ -555,7 +558,7 @@ def build(
     mulled_upload_records = _resolve_mulled_upload_records(
         mulled_upload_records, parsed_upload_target
     )
-    package_patterns: PackagePatterns = packages or "*"
+    package_patterns: PackagePatterns = packages or ["*"]
     parsed_git_range = _parse_git_range_if_needed(git_range)
     cfg = utils.load_config(config)
     setup = cfg.get("setup", None)
@@ -664,7 +667,7 @@ def dag(
 ) -> None:
     """Export the DAG of packages to a graph format file for visualization"""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
-    package_patterns: PackagePatterns = packages or "*"
+    package_patterns: PackagePatterns = packages or ["*"]
     config_data = utils.load_config(config)
     dag, name2recipes = graph.build(
         utils.get_recipes(recipe_folder, package_patterns), config_data
@@ -694,13 +697,13 @@ def dag(
                 for package in nx.topological_sort(subdag)
                 for recipe in name2recipes[package]
             ]
-            print("\n".join(recipes) + "\n")
+            print("\n".join(map(os.fspath, recipes)) + "\n")
         if not hide_singletons:
             print("# singletons")
             recipes = [
                 recipe for package in singletons for recipe in name2recipes[package]
             ]
-            print("\n".join(recipes) + "\n")
+            print("\n".join(map(os.fspath, recipes)) + "\n")
 
 
 @app.command("dependent")
@@ -744,9 +747,7 @@ def dependent(
             "One of `--dependencies` or `--reverse-dependencies` is required."
         )
     config_data = utils.load_config(config)
-    d, _ = graph.build(
-        utils.get_recipes(recipe_folder, "*"), config_data, restrict=restrict
-    )
+    d, _ = graph.build(utils.get_recipes(recipe_folder), config_data, restrict=restrict)
     if reverse_dependencies is not None:
         dependency_func = nx.algorithms.descendants
         selected_packages = reverse_dependencies
@@ -799,7 +800,7 @@ def lint(
 
     Reports a TSV of linting results to stdout."""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
-    package_patterns: PackagePatterns = packages or "*"
+    package_patterns: PackagePatterns = packages or ["*"]
     try:
         parsed_git_range = _parse_git_range_if_needed(git_range)
         if list_checks:
@@ -985,7 +986,7 @@ def update_pinning(
     """Bump a package build number and all dependencies as required due
     to a change in pinnings"""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines, threads)
-    package_patterns: PackagePatterns = packages or "*"
+    package_patterns: PackagePatterns = packages or ["*"]
     try:
         config_data = utils.load_config(config)
         if skip_additional_channels:
@@ -1001,7 +1002,7 @@ def update_pinning(
         dag = graph.build_from_recipes(
             (
                 r
-                for r in recipe.load_parallel_iter(recipe_folder, "*")
+                for r in recipe.load_parallel_iter(recipe_folder, ["*"])
                 if not skiplist.is_skiplisted(r)
             )
         )
@@ -1370,7 +1371,7 @@ def autobump(
 ) -> None:
     """Updates recipes in recipe_folder"""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines, threads)
-    package_patterns: PackagePatterns = packages or "*"
+    package_patterns: PackagePatterns = packages or ["*"]
     excluded_channels = exclude_channels or ["conda-forge"]
     use_default_signing_key = sign and sign_key is None
     try:
@@ -1651,7 +1652,7 @@ def create_mulled_manifests(
 @app.command("annotate-build-failures")
 def annotate_build_failures(
     recipes: Annotated[
-        list[str], typer.Argument(help="Paths to recipes that shall be skiplisted")
+        list[Path], typer.Argument(help="Paths to recipes that shall be skiplisted")
     ],
     skiplist: Annotated[
         bool, typer.Option("--skiplist", help="Skiplist recipes.")

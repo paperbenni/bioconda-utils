@@ -3,6 +3,7 @@ Construction and Manipulation of Package/Recipe Graphs
 """
 
 import logging
+from pathlib import Path
 
 from collections import defaultdict
 from fnmatch import fnmatch
@@ -23,11 +24,11 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 
 def build(
-    recipes: Iterable[str],
+    recipes: Iterable[Path],
     config: dict[str, Any],
     blacklist: Skiplist | None = None,
     restrict: bool = True,
-) -> tuple[nx.DiGraph, defaultdict[str, set[str]]]:
+) -> tuple[nx.DiGraph, defaultdict[str, set[Path]]]:
     """
     Returns the DAG of recipe paths and a dictionary that maps package names to
     lists of recipe paths to all defined versions of the package.  defined

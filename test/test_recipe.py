@@ -13,6 +13,7 @@ from bioconda_utils.recipe import (
     RenderFailure,
     DuplicateKey,
     MissingKey,
+    load_parallel_iter,
 )
 
 yaml = YAML(typ="rt")  # pylint: disable=invalid-name
@@ -94,6 +95,18 @@ def test_empty_recipe(tmpdir):
         Recipe.from_file(Path(tmpdir), Path(tmpdir))
     res = Recipe.from_file(Path(tmpdir), Path(tmpdir), return_exceptions=True)
     assert isinstance(res, EmptyRecipe)
+
+
+def test_load_parallel_iter_accepts_discovered_recipe_paths(tmp_path):
+    recipe_dir = tmp_path / "recipes" / "example"
+    recipe_dir.mkdir(parents=True)
+    (recipe_dir / "meta.yaml").write_text(
+        'package:\n  name: example\n  version: "1.0"\n', encoding="utf-8"
+    )
+
+    loaded = list(load_parallel_iter(tmp_path / "recipes", ["*"]))
+
+    assert [recipe.path for recipe in loaded] == [recipe_dir / "meta.yaml"]
 
 
 def test_file_not_found():

@@ -28,7 +28,7 @@ from typing import (
     overload,
     Literal,
 )
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from re import Pattern
 
 
@@ -942,8 +942,10 @@ class Recipe:
             self._conda_tempdir = None
 
 
-def load_parallel_iter(recipe_folder, packages):
-    recipes = list(utils.get_recipes(recipe_folder, packages))
+def load_parallel_iter(
+    recipe_folder: Path, package_patterns: Sequence[str]
+) -> Iterator[Recipe]:
+    recipes = list(utils.get_recipes(recipe_folder, package_patterns))
     for recipe in utils.parallel_iter(
         Recipe.from_file,
         recipes,

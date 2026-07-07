@@ -125,12 +125,12 @@ class RecipeSource:
     def __init__(
         self,
         recipe_base: Path,
-        packages: str | list[str],
+        packages: list[str],
         exclude: list[str],
         shuffle: bool = True,
     ) -> None:
         self.recipe_base = recipe_base
-        self.packages = [packages] if isinstance(packages, str) else packages
+        self.packages = packages
         self.recipe_dirs = list(utils.get_recipes(recipe_base, self.packages, exclude))
         if shuffle:
             random.shuffle(self.recipe_dirs)
@@ -162,7 +162,7 @@ class RecipeGraphSource(RecipeSource):
     def __init__(
         self,
         recipe_base: Path,
-        packages: str | list[str],
+        packages: list[str],
         exclude: list[str],
         shuffle: bool,
         config: dict[str, str],
@@ -209,7 +209,7 @@ class RecipeGraphSource(RecipeSource):
             blacklist = Skiplist(self.config, self.recipe_base)
             dag = graph.build_from_recipes(
                 recipe
-                for recipe in recipes_load_parallel_iter(self.recipe_base, "*")
+                for recipe in recipes_load_parallel_iter(self.recipe_base, ["*"])
                 if not blacklist.is_skiplisted(recipe)
             )
             if self.cache_fn:

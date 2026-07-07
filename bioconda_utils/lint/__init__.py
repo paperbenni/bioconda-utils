@@ -580,7 +580,7 @@ class Linter:
             skip_dict[recipe].append(func)
         return skip_dict
 
-    def lint(self, recipe_names: list[str], fix: bool = False) -> bool:
+    def lint(self, recipe_names: list[Path], fix: bool = False) -> bool:
         """Run linter on multiple recipes
 
         Lint messages are collected in the linter. They can be retrieved
@@ -608,7 +608,7 @@ class Linter:
 
         return any(message.severity >= ERROR for message in self._messages)
 
-    def lint_one(self, recipe_name: str, fix: bool = False) -> list[LintMessage]:
+    def lint_one(self, recipe_name: Path, fix: bool = False) -> list[LintMessage]:
         """Run the linter on a single recipe
 
         Args:
@@ -619,14 +619,14 @@ class Linter:
           List of collected messages
         """
         try:
-            recipe = _recipe.Recipe.from_file(self.recipe_folder, Path(recipe_name))
+            recipe = _recipe.Recipe.from_file(self.recipe_folder, recipe_name)
         except _recipe.RecipeError as exc:
-            recipe = _recipe.Recipe(Path(recipe_name), self.recipe_folder)
+            recipe = _recipe.Recipe(recipe_name, self.recipe_folder)
             check_cls = recipe_error_to_lint_check.get(exc.__class__, linter_failure)
             return [check_cls.make_message(recipe=recipe, line=getattr(exc, "line"))]
 
         # collect checks to skip
-        checks_to_skip = set(self.skip[recipe_name])
+        checks_to_skip = set(self.skip[os.fspath(recipe_name)])
         checks_to_skip.update(self.exclude)
         if isinstance(recipe.get("extra/skip-lints", []), list):
             # If they are not, the extra_skip_lints_not_list check

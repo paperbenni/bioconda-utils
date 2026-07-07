@@ -86,7 +86,7 @@ def conda_build_purge() -> None:
 
 
 def build(
-    recipe: str,
+    recipe: Path,
     pkg_paths: list[str] | None = None,
     testonly: bool = False,
     mulled_build_and_test: bool = True,
@@ -319,7 +319,7 @@ def build(
 
 
 def store_build_failure_record(
-    recipe: str,
+    recipe: Path,
     output: str | None,
     meta: MetaData,
     dag: nx.DiGraph,
@@ -342,9 +342,9 @@ def store_build_failure_record(
 
 def remove_cycles(
     dag: nx.DiGraph,
-    name2recipes: dict[str, set[str]],
-    failed: list[str],
-    skip_dependent: defaultdict[str, list[str]],
+    name2recipes: dict[str, set[Path]],
+    failed: list[Path],
+    skip_dependent: defaultdict[str, list[Path]],
 ) -> nx.DiGraph:
     nodes_in_cycles = set()
     for cycle in list(nx.simple_cycles(dag)):
@@ -434,7 +434,7 @@ def get_worker_subdag(
 
 
 def should_skip_platform(
-    recipe_folder: Path, recipe: str, platform: PackageSubdir
+    recipe_folder: Path, recipe: Path, platform: PackageSubdir
 ) -> bool:
     """
     Return True if *platform* is a non-primary subdir (``linux-aarch64``,
@@ -447,7 +447,7 @@ def should_skip_platform(
     every recipe would be attempted on every non-x86_64 builder, wasting time
     on recipes that have not been verified for that platform.
     """
-    recipe_obj = _recipe.Recipe.from_file(recipe_folder, Path(recipe))
+    recipe_obj = _recipe.Recipe.from_file(recipe_folder, recipe)
     primary_platforms = {PackageSubdir.LINUX_64, PackageSubdir.OSX_64}
     additional_platforms = set(ALL_PACKAGE_SUBDIRS) - primary_platforms
     return (
@@ -459,7 +459,7 @@ def should_skip_platform(
 def build_recipes(
     recipe_folder: Path,
     config: dict[str, Any],
-    recipes: list[str],
+    recipes: list[Path],
     mulled_build_and_test: bool = True,
     testonly: bool = False,
     force: bool = False,
@@ -574,7 +574,7 @@ def build_recipes(
         for recipe in recipe_list:
             recipe2name[recipe] = name
 
-    recipe_jobs: list[tuple[str, str]] = [
+    recipe_jobs: list[tuple[Path, str]] = [
         (recipe, recipe2name[recipe])
         for package in nx.topological_sort(subdag)
         for recipe in name2recipes[package]
@@ -718,7 +718,7 @@ def build_recipes(
             logger.error(
                 "BUILD SUMMARY: while the entire build failed, "
                 "the following recipes were built successfully:\n%s",
-                "\n".join(built_recipes),
+                "\n".join(map(os.fspath, built_recipes)),
             )
         for recipe in failed:
             logger.error("BUILD SUMMARY: FAILED recipe %s", recipe)

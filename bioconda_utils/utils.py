@@ -25,7 +25,7 @@ import psutil
 from threading import Event, Thread
 from pathlib import Path, PurePath
 from collections import Counter, defaultdict, namedtuple, deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from itertools import product, chain, zip_longest
 from functools import partial
 from typing import Any, cast
@@ -327,7 +327,7 @@ def setup_logger(
 
 
 def ellipsize_recipes(
-    recipes: Collection[str], recipe_folder: Path, n: int = 5, m: int = 50
+    recipes: Collection[Path], recipe_folder: Path, n: int = 5, m: int = 50
 ) -> str:
     """Logging helper showing recipe list
 
@@ -349,10 +349,7 @@ def ellipsize_recipes(
         append = ""
     return (
         " ("
-        + ", ".join(
-            recipe.replace(os.fspath(recipe_folder), "").lstrip("/")
-            for recipe in recipes
-        )
+        + ", ".join(os.fspath(recipe.relative_to(recipe_folder)) for recipe in recipes)
         + append
         + ")"
     )
@@ -907,7 +904,11 @@ def format_link(uri, fmt: str, prefix: str = "", label: str = ""):
         raise ValueError(f"Invalid link format: {fmt}")
 
 
-def get_recipes(recipe_folder, package="*", exclude=None):
+def get_recipes(
+    recipe_folder: Path,
+    package_patterns: Sequence[str] = ("*",),
+    exclude_patterns: Sequence[str] = (),
+) -> Iterator[Path]:
     """
     Generator of recipes.
 
@@ -915,40 +916,43 @@ def get_recipes(recipe_folder, package="*", exclude=None):
 
     Parameters
     ----------
-    recipe_folder : str
+    recipe_folder : Path
         Top-level dir of the recipes
 
-    package : str or iterable
+    package_patterns : sequence of str
         Pattern or patterns to restrict the results.
+
+    exclude_patterns : sequence of str
+        Patterns to exclude from the results.
     """
-    if isinstance(package, str):
-        package = [package]
-    if isinstance(exclude, str):
-        exclude = [exclude]
-    if exclude is None:
-        exclude = []
-    for p in package:
-        logger.debug("get_recipes(%s, package='%s'): %s", recipe_folder, package, p)
-        path = os.path.join(recipe_folder, p)
+    recipe_folder_text = os.fspath(recipe_folder)
+    for pattern in package_patterns:
+        logger.debug(
+            "get_recipes(%s, package_patterns=%s): %s",
+            recipe_folder,
+            package_patterns,
+            pattern,
+        )
+        path = os.path.join(recipe_folder, pattern)
         for new_dir in glob.glob(path):
             meta_yaml_found_or_excluded = False
             for dir_path, _, file_names in os.walk(new_dir):
                 if any(
-                    fnmatch.fnmatch(dir_path[len(recipe_folder) :], pat)
-                    for pat in exclude
+                    fnmatch.fnmatch(dir_path[len(recipe_folder_text) :], pat)
+                    for pat in exclude_patterns
                 ):
                     meta_yaml_found_or_excluded = True
                     continue
                 if "meta.yaml" in file_names:
                     meta_yaml_found_or_excluded = True
-                    yield dir_path
+                    yield Path(dir_path)
             if not meta_yaml_found_or_excluded and os.path.isdir(new_dir):
                 logger.warning(
                     "No meta.yaml found in %s."
                     " If you want to ignore this directory, add it to the blacklist.",
                     new_dir,
                 )
-                yield new_dir
+                yield Path(new_dir)
 
 
 class DivergentBuildsError(Exception):

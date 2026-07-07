@@ -139,7 +139,7 @@ def test_recipe_selection_uses_range_base_and_ref(monkeypatch):
         cli.GitRange.parse("main...feature"), Path("recipes")
     )
 
-    assert result == ["recipes/example"]
+    assert result == [Path("recipes/example")]
     assert calls == [("feature", "main")]
 
 

@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class BuildFailureRecord:
     git_handler = None
 
-    def __init__(self, recipe: str | Recipe, platform: str | None = None) -> None:
+    def __init__(self, recipe: Path | Recipe, platform: str | None = None) -> None:
         if isinstance(recipe, Recipe):
             self.recipe_path = recipe.path
         else:
@@ -238,7 +238,7 @@ def collect_build_failure_dataframe(
     link_prefix: str = "",
     git_range: GitRange | None = None,
 ) -> pd.DataFrame:
-    def get_build_failure_records(recipe: str) -> Iterator[BuildFailureRecord]:
+    def get_build_failure_records(recipe: Path) -> Iterator[BuildFailureRecord]:
         return filter(
             BuildFailureRecord.exists,
             [
@@ -247,14 +247,17 @@ def collect_build_failure_dataframe(
             ],
         )
 
-    def has_build_failure(recipe: str) -> bool:
+    def has_build_failure(recipe: Path) -> bool:
         return any(get_build_failure_records(recipe))
 
     recipes = list(utils.get_recipes(recipe_folder))
 
     if git_range:
         repo = BiocondaRepo(recipe_folder)
-        changed_recipes = repo.get_recipes_to_build(git_range.ref, git_range.base)
+        changed_recipes = [
+            Path(recipe)
+            for recipe in repo.get_recipes_to_build(git_range.ref, git_range.base)
+        ]
         logger.info(
             "Constraining to %s git modified recipes%s.",
             len(changed_recipes),

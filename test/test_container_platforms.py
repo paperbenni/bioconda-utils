@@ -5,23 +5,30 @@ from unittest.mock import Mock
 import pytest
 
 from bioconda_utils import _types, build, cli, docker_utils, pkg_test, upload
-from bioconda_utils._types import PkgBuildRef
+from bioconda_utils._types import ContainerPlatform, PackageSubdir, PkgBuildRef
 
 SAMTOOLS_1_3_0 = PkgBuildRef(name="samtools", version="1.3", build_string="0")
 BIOCONTAINERS = _types.QuayUploadTarget("biocontainers")
 
 
 def test_container_platform_maps_to_package_subdir():
-    assert _types.container_platform_to_package_subdir("linux/amd64") == "linux-64"
-    assert _types.container_platform_to_package_subdir("linux/arm64") == "linux-aarch64"
     assert (
-        _types.container_platform_to_package_subdir("linux/riscv64") == "linux-riscv64"
+        _types.container_platform_to_package_subdir(ContainerPlatform.LINUX_AMD64)
+        == PackageSubdir.LINUX_64
+    )
+    assert (
+        _types.container_platform_to_package_subdir(ContainerPlatform.LINUX_ARM64)
+        == PackageSubdir.LINUX_AARCH64
+    )
+    assert (
+        _types.container_platform_to_package_subdir(ContainerPlatform.LINUX_RISCV64)
+        == PackageSubdir.LINUX_RISCV64
     )
 
 
 def test_osx_package_subdir_has_no_container_platform():
     with pytest.raises(ValueError, match="cannot be installed in Linux"):
-        _types.package_subdir_to_container_platform("osx-64")
+        _types.package_subdir_to_container_platform(PackageSubdir.OSX_64)
 
 
 def test_docker_build_script_creates_supported_linux_channel_subdirs():
@@ -33,7 +40,7 @@ def test_docker_build_script_creates_supported_linux_channel_subdirs():
                 container_recipe="/opt/recipe",
                 user_info={"uid": 1000},
             ),
-            "arch": "linux-riscv64",
+            "arch": PackageSubdir.LINUX_RISCV64,
             "local_channel_mkdirs": docker_utils.LOCAL_CHANNEL_MKDIRS,
         }
     )
@@ -47,9 +54,11 @@ def test_docker_build_script_creates_supported_linux_channel_subdirs():
 def test_docker_platform_tag_suffix_matches_mulled_build_convention(monkeypatch):
     monkeypatch.setattr(_types.platform, "machine", lambda: "x86_64")
     assert _types.docker_platform_tag_suffix(None) is None
-    assert _types.docker_platform_tag_suffix("linux/amd64") is None
-    assert _types.docker_platform_tag_suffix("linux/arm64") == "arm64"
-    assert _types.docker_platform_tag_suffix("linux/riscv64") == "riscv64"
+    assert _types.docker_platform_tag_suffix(ContainerPlatform.LINUX_AMD64) is None
+    assert _types.docker_platform_tag_suffix(ContainerPlatform.LINUX_ARM64) == "arm64"
+    assert (
+        _types.docker_platform_tag_suffix(ContainerPlatform.LINUX_RISCV64) == "riscv64"
+    )
 
     monkeypatch.setattr(_types.platform, "machine", lambda: "aarch64")
     assert _types.docker_platform_tag_suffix(None) == "arm64"
@@ -59,29 +68,36 @@ def test_cli_rejects_docker_build_container_platform_mismatch():
     with pytest.raises(ValueError, match="linux-aarch64 packages require linux/arm64"):
         cli._validate_container_platforms_for_build(
             docker=True,
-            platform="linux/arm64",
-            container_platform=["linux/amd64", "linux/arm64"],
+            platform=ContainerPlatform.LINUX_ARM64,
+            container_platform=[
+                ContainerPlatform.LINUX_AMD64,
+                ContainerPlatform.LINUX_ARM64,
+            ],
         )
 
 
 def test_cli_rejects_native_build_container_platform_mismatch(monkeypatch):
-    monkeypatch.setattr(cli.utils.RepoData, "native_subdir", lambda: "linux-64")
+    monkeypatch.setattr(
+        cli.utils.RepoData, "native_subdir", lambda: PackageSubdir.LINUX_64
+    )
 
     with pytest.raises(ValueError, match="linux-64 packages require linux/amd64"):
         cli._validate_container_platforms_for_build(
             docker=False,
             platform=None,
-            container_platform=["linux/arm64"],
+            container_platform=[ContainerPlatform.LINUX_ARM64],
         )
 
 
 def test_cli_accepts_matching_container_platform(monkeypatch):
-    monkeypatch.setattr(cli.utils.RepoData, "native_subdir", lambda: "linux-64")
+    monkeypatch.setattr(
+        cli.utils.RepoData, "native_subdir", lambda: PackageSubdir.LINUX_64
+    )
 
     cli._validate_container_platforms_for_build(
         docker=False,
         platform=None,
-        container_platform=["linux/amd64"],
+        container_platform=[ContainerPlatform.LINUX_AMD64],
     )
 
 
@@ -93,7 +109,9 @@ def test_handle_merged_pr_fallback_rejects_container_platform_mismatch(
     config = tmp_path / "config.yaml"
     config.write_text("channels: []\n", encoding="utf-8")
 
-    monkeypatch.setattr(cli.utils.RepoData, "native_subdir", lambda: "linux-aarch64")
+    monkeypatch.setattr(
+        cli.utils.RepoData, "native_subdir", lambda: PackageSubdir.LINUX_AARCH64
+    )
     monkeypatch.setattr(
         cli,
         "upload_pr_artifacts",
@@ -113,15 +131,15 @@ def test_handle_merged_pr_fallback_rejects_container_platform_mismatch(
             config,
             repo="bioconda/bioconda-recipes",
             git_range="base...head",
-            package_platform="linux-aarch64",
-            container_platform=["linux/amd64"],
+            package_platform=PackageSubdir.LINUX_AARCH64,
+            container_platform=[ContainerPlatform.LINUX_AMD64],
         )
 
 
 def test_mulled_image_metadata_records_target_platform():
-    image = build.mulled_image_metadata(SAMTOOLS_1_3_0, "linux/arm64")
+    image = build.mulled_image_metadata(SAMTOOLS_1_3_0, ContainerPlatform.LINUX_ARM64)
     assert image.pkg_ref == SAMTOOLS_1_3_0
-    assert image.target_platform == "linux/arm64"
+    assert image.target_platform == ContainerPlatform.LINUX_ARM64
 
 
 def test_mulled_image_metadata_records_native_platform(monkeypatch):
@@ -130,11 +148,11 @@ def test_mulled_image_metadata_records_native_platform(monkeypatch):
         build, "native_container_platform", _types.native_container_platform
     )
     image = build.mulled_image_metadata(SAMTOOLS_1_3_0)
-    assert image.target_platform == "linux/arm64"
+    assert image.target_platform == ContainerPlatform.LINUX_ARM64
 
 
 def test_test_package_passes_target_platform(monkeypatch, tmp_path):
-    package = tmp_path / "conda-bld" / "linux-64" / "samtools-1.3-0.tar.bz2"
+    package = tmp_path / "conda-bld" / PackageSubdir.LINUX_64 / "samtools-1.3-0.tar.bz2"
     package.parent.mkdir(parents=True)
     package.write_bytes(b"")
 
@@ -150,14 +168,14 @@ def test_test_package_passes_target_platform(monkeypatch, tmp_path):
 
     pkg_test.build_and_test_mulled_image(
         str(package),
-        target_platform="linux/arm64",
+        target_platform=ContainerPlatform.LINUX_ARM64,
     )
 
     assert commands
     cmd = commands[0]
     assert cmd[0:2] == ["mulled-build", "build-and-test"]
     assert "--target-platform" in cmd
-    assert cmd[cmd.index("--target-platform") + 1] == "linux/arm64"
+    assert cmd[cmd.index("--target-platform") + 1] == ContainerPlatform.LINUX_ARM64
 
 
 def test_recipe_builder_build_image_passes_target_platform(monkeypatch, tmp_path):
@@ -168,7 +186,7 @@ def test_recipe_builder_build_image_passes_target_platform(monkeypatch, tmp_path
     builder.docker_temp_image = "tmp-bioconda-builder"
     builder.docker_base_image = "quay.io/bioconda/build-env:latest"
     builder.dockerfile_template = "FROM {docker_base_image}\n{proxies}\n"
-    builder.target_platform = "linux/arm64"
+    builder.target_platform = ContainerPlatform.LINUX_ARM64
     builder.build_image = True
     builder.keep_image = True
 
@@ -187,7 +205,7 @@ def test_recipe_builder_build_image_passes_target_platform(monkeypatch, tmp_path
 
     assert commands
     assert commands[0][0:3] == ["docker", "build", "--platform"]
-    assert commands[0][3] == "linux/arm64"
+    assert commands[0][3] == ContainerPlatform.LINUX_ARM64
 
 
 def test_mulled_upload_passes_target_platform(monkeypatch):
@@ -220,7 +238,9 @@ def test_mulled_upload_passes_target_platform(monkeypatch):
         run,
     )
 
-    record = upload.mulled_upload(SAMTOOLS_1_3_0, BIOCONTAINERS, "linux/arm64")
+    record = upload.mulled_upload(
+        SAMTOOLS_1_3_0, BIOCONTAINERS, ContainerPlatform.LINUX_ARM64
+    )
 
     ref = "quay.io/biocontainers/samtools:1.3--0-arm64"
     assert any(ref in arg for arg in commands[1])
@@ -250,7 +270,7 @@ def test_mulled_upload_stages_amd64_under_suffixed_tag(monkeypatch):
         run,
     )
 
-    upload.mulled_upload(SAMTOOLS_1_3_0, BIOCONTAINERS, "linux/amd64")
+    upload.mulled_upload(SAMTOOLS_1_3_0, BIOCONTAINERS, ContainerPlatform.LINUX_AMD64)
 
     assert "quay.io/biocontainers/samtools:1.3--0-amd64" in " ".join(commands[1])
 
@@ -268,7 +288,9 @@ def test_mulled_upload_rejects_wrong_source_platform(monkeypatch):
     )
 
     with pytest.raises(RuntimeError, match="Image platform mismatch"):
-        upload.mulled_upload(SAMTOOLS_1_3_0, BIOCONTAINERS, "linux/arm64")
+        upload.mulled_upload(
+            SAMTOOLS_1_3_0, BIOCONTAINERS, ContainerPlatform.LINUX_ARM64
+        )
 
 
 def test_upload_mulled_image_source_records_destination_digest(monkeypatch):
@@ -294,7 +316,7 @@ def test_upload_mulled_image_source_records_destination_digest(monkeypatch):
     record = upload.upload_mulled_image_source(
         "docker-archive:/tmp/samtools.tar.gz",
         "quay.io/biocontainers/samtools:1.3--0",
-        "linux/arm64",
+        ContainerPlatform.LINUX_ARM64,
     )
 
     assert commands[1][0:4] == ["skopeo", "--command-timeout", "600s", "copy"]
@@ -311,7 +333,7 @@ def test_upload_mulled_image_source_requires_registry_auth_by_default(monkeypatc
         upload.upload_mulled_image_source(
             "docker-archive:/tmp/samtools.tar.gz",
             "quay.io/biocontainers/samtools:1.3--0",
-            "linux/arm64",
+            ContainerPlatform.LINUX_ARM64,
         )
 
 
@@ -339,7 +361,7 @@ def test_upload_mulled_image_source_can_use_ambient_registry_auth(monkeypatch):
     upload.upload_mulled_image_source(
         "docker-archive:/tmp/samtools.tar.gz",
         "quay.io/biocontainers/samtools:1.3--0",
-        "linux/arm64",
+        ContainerPlatform.LINUX_ARM64,
         use_existing_auth=True,
     )
 
@@ -393,8 +415,8 @@ def test_purge_image_removes_biocontainers_local_image(monkeypatch):
     # for a crash where it ran `docker rmi quay.io/<upload-target>/...` against
     # an image that was never tagged locally, raising CalledProcessError and
     # aborting the build after a successful upload.
-    docker_utils.purgeImage(SAMTOOLS_1_3_0, "linux/arm64")
-    docker_utils.purgeImage(SAMTOOLS_1_3_0, "linux/amd64")
+    docker_utils.purgeImage(SAMTOOLS_1_3_0, ContainerPlatform.LINUX_ARM64)
+    docker_utils.purgeImage(SAMTOOLS_1_3_0, ContainerPlatform.LINUX_AMD64)
 
     assert commands == [
         ["docker", "rmi", "quay.io/biocontainers/samtools:1.3--0-arm64"],
@@ -429,7 +451,9 @@ def test_mulled_upload_sources_local_image_from_biocontainers(monkeypatch):
     # Upload to a NON-biocontainers target: the destination is quay0-namespaced,
     # but the skopeo copy source must still be the biocontainers local image.
     upload.mulled_upload(
-        SAMTOOLS_1_3_0, _types.QuayUploadTarget("quay0"), "linux/amd64"
+        SAMTOOLS_1_3_0,
+        _types.QuayUploadTarget("quay0"),
+        ContainerPlatform.LINUX_AMD64,
     )
 
     assert sources == ["docker-daemon:quay.io/biocontainers/samtools:1.3--0"]

@@ -448,7 +448,7 @@ def should_skip_platform(
     on recipes that have not been verified for that platform.
     """
     recipe_obj = _recipe.Recipe.from_file(recipe_folder, recipe)
-    primary_platforms: set[PackageSubdir] = {"linux-64", "osx-64"}
+    primary_platforms = {PackageSubdir.LINUX_64, PackageSubdir.OSX_64}
     additional_platforms = set(PACKAGE_SUBDIRS) - primary_platforms
     return (
         platform in additional_platforms

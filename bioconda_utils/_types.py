@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import platform
-import typing
+from enum import StrEnum
 from typing import (
     Any,
     Literal,
@@ -10,7 +10,6 @@ from typing import (
     Protocol,
     TypedDict,
     TypeAlias,
-    cast,
 )
 
 
@@ -20,24 +19,32 @@ class Config(dict[str, Any]):
 
 #: Docker/OCI platform notation used by Docker, buildx, skopeo, registry
 #: manifests, and mulled-build's ``--target-platform``.
-ContainerPlatform: TypeAlias = Literal["linux/amd64", "linux/arm64", "linux/riscv64"]
-# get_args() preserves the runtime values but not their Literal type.
-CONTAINER_PLATFORMS: tuple[ContainerPlatform, ...] = cast(
-    tuple[ContainerPlatform, ...],
-    typing.get_args(ContainerPlatform),
-)
-CONTAINER_PLATFORM_SET = frozenset(CONTAINER_PLATFORMS)
+class ContainerPlatform(StrEnum):
+    """Supported Docker/OCI platforms."""
+
+    LINUX_AMD64 = "linux/amd64"
+    LINUX_ARM64 = "linux/arm64"
+    LINUX_RISCV64 = "linux/riscv64"
+
+
+CONTAINER_PLATFORMS: tuple[ContainerPlatform, ...] = tuple(ContainerPlatform)
+
+
 #: Conda package subdir notation for *built* per-architecture packages. This
 #: is the directory under a conda channel, for example ``linux-64`` or
 #: ``linux-aarch64``. ``noarch`` is excluded because noarch packages have no
 #: per-architecture artifact.
-PackageSubdir: TypeAlias = Literal[
-    "linux-64", "linux-aarch64", "linux-riscv64", "osx-64", "osx-arm64"
-]
-PACKAGE_SUBDIRS: tuple[PackageSubdir, ...] = cast(
-    tuple[PackageSubdir, ...],
-    typing.get_args(PackageSubdir),
-)
+class PackageSubdir(StrEnum):
+    """Conda subdirectories containing architecture-specific packages."""
+
+    LINUX_64 = "linux-64"
+    LINUX_AARCH64 = "linux-aarch64"
+    LINUX_RISCV64 = "linux-riscv64"
+    OSX_64 = "osx-64"
+    OSX_ARM64 = "osx-arm64"
+
+
+PACKAGE_SUBDIRS: tuple[PackageSubdir, ...] = tuple(PackageSubdir)
 #: Conda repodata subdir notation, including ``noarch``.
 Subdir: TypeAlias = PackageSubdir | Literal["noarch"]
 #: A two-part OS label -- the form conda-build's ``config.platform`` and its
@@ -51,9 +58,9 @@ QuayUploadTarget = NewType("QuayUploadTarget", str)
 #: platform strings. macOS package subdirs intentionally have no container
 #: platform because mulled containers are Linux images.
 PACKAGE_SUBDIR_TO_CONTAINER_PLATFORM: dict[PackageSubdir, ContainerPlatform] = {
-    "linux-64": "linux/amd64",
-    "linux-aarch64": "linux/arm64",
-    "linux-riscv64": "linux/riscv64",
+    PackageSubdir.LINUX_64: ContainerPlatform.LINUX_AMD64,
+    PackageSubdir.LINUX_AARCH64: ContainerPlatform.LINUX_ARM64,
+    PackageSubdir.LINUX_RISCV64: ContainerPlatform.LINUX_RISCV64,
 }
 CONTAINER_PLATFORM_TO_PACKAGE_SUBDIR: dict[ContainerPlatform, PackageSubdir] = {
     container_platform: package_subdir
@@ -97,13 +104,14 @@ def normalize_container_platform(
         location = f" for {ref}" if ref else ""
         raise RuntimeError(f"Image platform{location} has no OS/architecture")
     platform_value = f"{os_name}/{architecture}"
-    if platform_value not in CONTAINER_PLATFORM_SET:
+    try:
+        return ContainerPlatform(platform_value)
+    except ValueError as exc:
         suffix = f"/{variant}" if variant else ""
         location = f" for {ref}" if ref else ""
         raise RuntimeError(
             f"Unsupported container platform{location}: {platform_value}{suffix}"
-        )
-    return cast(ContainerPlatform, platform_value)
+        ) from exc
 
 
 def parse_quay_upload_target(value: str | None) -> QuayUploadTarget | None:
@@ -128,7 +136,7 @@ def docker_platform_tag_suffix(target_platform: ContainerPlatform | None) -> str
     tests must change with it.
     """
     target_platform = target_platform or native_container_platform()
-    if target_platform == "linux/amd64":
+    if target_platform is ContainerPlatform.LINUX_AMD64:
         return None
     return target_platform.removeprefix("linux/").replace("/", "-")
 
@@ -180,11 +188,11 @@ def native_container_platform() -> ContainerPlatform:
     """Return the supported Linux container platform matching this host."""
     arch = platform.machine().lower()
     if arch in ("x86_64", "amd64"):
-        return "linux/amd64"
+        return ContainerPlatform.LINUX_AMD64
     if arch in ("aarch64", "arm64"):
-        return "linux/arm64"
+        return ContainerPlatform.LINUX_ARM64
     if arch == "riscv64":
-        return "linux/riscv64"
+        return ContainerPlatform.LINUX_RISCV64
     raise ValueError(f"Unsupported native container architecture: {arch}")
 
 

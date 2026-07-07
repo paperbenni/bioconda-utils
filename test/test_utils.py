@@ -23,7 +23,7 @@ from bioconda_utils import (
     upload,
     utils,
 )
-from bioconda_utils._types import Config
+from bioconda_utils._types import Config, PackageSubdir
 from bioconda_utils.utils import validate_config
 
 logger = logging.getLogger(__name__)
@@ -1122,7 +1122,7 @@ def test_native_platform_skipping(config_fixture):
         recipe_folder = os.path.dirname(r.recipe_dirs[recipe_name])
         assert (
             build.should_skip_platform(
-                recipe_folder, r.recipe_dirs[recipe_name], platform
+                recipe_folder, r.recipe_dirs[recipe_name], PackageSubdir(platform)
             )
             == result
         )

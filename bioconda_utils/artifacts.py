@@ -42,9 +42,9 @@ IMAGE_RE = re.compile(r"(.+)(?::|%3A|---)(.+)\.tar\.gz$")
 # f"{platform}-packages"; these exceptions keep compatibility with historical
 # workflow names.
 GHA_ARTIFACT_NAME_EXCEPTIONS: dict[PackageSubdir, str] = {
-    "linux-64": "linux-packages",
-    "osx-64": "osx-packages",
-    "linux-aarch64": "linux-arm64-packages",
+    PackageSubdir.LINUX_64: "linux-packages",
+    PackageSubdir.OSX_64: "osx-packages",
+    PackageSubdir.LINUX_AARCH64: "linux-arm64-packages",
 }
 
 
@@ -56,9 +56,9 @@ def _gha_artifact_names_for_platform(platform: PackageSubdir) -> set[str]:
 
 def _job_platform_from_package_platform(package_platform: PackageSubdir) -> str:
     """Return the legacy CI job platform label for a conda package subdir."""
-    if package_platform == "linux-64":
+    if package_platform is PackageSubdir.LINUX_64:
         return "linux"
-    if package_platform == "osx-64":
+    if package_platform is PackageSubdir.OSX_64:
         return "osx"
     return package_platform
 

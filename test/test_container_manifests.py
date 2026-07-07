@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from bioconda_utils import container_manifests
+from bioconda_utils._types import ContainerPlatform
 from bioconda_utils.container_manifests import (
     ManifestDescriptor,
     MulledImageRecord,
@@ -14,11 +15,11 @@ from bioconda_utils.container_manifests import (
 def test_platform_ref_uses_staging_suffix_for_every_architecture():
     canonical = "quay.io/biocontainers/samtools:1.20--h50ea8bc_0"
     assert (
-        container_manifests.platform_ref(canonical, "linux/amd64")
+        container_manifests.platform_ref(canonical, ContainerPlatform.LINUX_AMD64)
         == f"{canonical}-amd64"
     )
     assert (
-        container_manifests.platform_ref(canonical, "linux/arm64")
+        container_manifests.platform_ref(canonical, ContainerPlatform.LINUX_ARM64)
         == f"{canonical}-arm64"
     )
 
@@ -33,13 +34,13 @@ def test_platform_ref_uses_staging_suffix_for_every_architecture():
 )
 def test_platform_ref_rejects_noncanonical_refs(ref):
     with pytest.raises(ValueError, match="fully-qualified tagged"):
-        container_manifests.platform_ref(ref, "linux/amd64")
+        container_manifests.platform_ref(ref, ContainerPlatform.LINUX_AMD64)
 
 
 def test_record_roundtrip_and_deduplication(tmp_path):
     record = MulledImageRecord(
         canonical_ref="quay.io/biocontainers/samtools:1.20--0",
-        platform="linux/arm64",
+        platform=ContainerPlatform.LINUX_ARM64,
         platform_ref="quay.io/biocontainers/samtools:1.20--0-arm64",
         digest="sha256:" + "a" * 64,
     )
@@ -54,7 +55,7 @@ def test_record_roundtrip_and_deduplication(tmp_path):
 def test_write_image_record_creates_unique_file(tmp_path):
     record = MulledImageRecord(
         canonical_ref="quay.io/biocontainers/samtools:1.20--0",
-        platform="linux/arm64",
+        platform=ContainerPlatform.LINUX_ARM64,
         platform_ref="quay.io/biocontainers/samtools:1.20--0-arm64",
         digest="sha256:" + "a" * 64,
     )
@@ -70,7 +71,7 @@ def test_write_image_record_creates_unique_file(tmp_path):
 def test_load_records_from_directory_ignores_non_jsonl_files(tmp_path):
     record = MulledImageRecord(
         canonical_ref="quay.io/biocontainers/samtools:1.20--0",
-        platform="linux/arm64",
+        platform=ContainerPlatform.LINUX_ARM64,
         platform_ref="quay.io/biocontainers/samtools:1.20--0-arm64",
         digest="sha256:" + "a" * 64,
     )
@@ -87,7 +88,7 @@ def test_load_records_rejects_mismatched_platform_ref(tmp_path):
         json.dumps(
             {
                 "canonical_ref": "quay.io/biocontainers/samtools:1.20--0",
-                "platform": "linux/arm64",
+                "platform": ContainerPlatform.LINUX_ARM64,
                 "platform_ref": "quay.io/biocontainers/samtools:wrong",
                 "digest": "sha256:" + "a" * 64,
             }
@@ -103,7 +104,7 @@ def test_load_records_rejects_invalid_digest(tmp_path):
         json.dumps(
             {
                 "canonical_ref": "quay.io/biocontainers/samtools:1.20--0",
-                "platform": "linux/arm64",
+                "platform": ContainerPlatform.LINUX_ARM64,
                 "platform_ref": "quay.io/biocontainers/samtools:1.20--0-arm64",
                 "digest": "not-a-digest",
             }
@@ -117,18 +118,24 @@ def test_reconcile_is_idempotent(monkeypatch):
     canonical = "quay.io/biocontainers/samtools:1.20--0"
     records = [
         MulledImageRecord(
-            canonical, "linux/amd64", f"{canonical}-amd64", "sha256:" + "a" * 64
+            canonical,
+            ContainerPlatform.LINUX_AMD64,
+            f"{canonical}-amd64",
+            "sha256:" + "a" * 64,
         ),
         MulledImageRecord(
-            canonical, "linux/arm64", f"{canonical}-arm64", "sha256:" + "b" * 64
+            canonical,
+            ContainerPlatform.LINUX_ARM64,
+            f"{canonical}-arm64",
+            "sha256:" + "b" * 64,
         ),
     ]
     monkeypatch.setattr(
         container_manifests,
         "_current_descriptors",
         lambda *_args: {
-            "linux/amd64": "sha256:" + "a" * 64,
-            "linux/arm64": "sha256:" + "b" * 64,
+            ContainerPlatform.LINUX_AMD64: "sha256:" + "a" * 64,
+            ContainerPlatform.LINUX_ARM64: "sha256:" + "b" * 64,
         },
     )
     publish = []
@@ -140,7 +147,9 @@ def test_reconcile_is_idempotent(monkeypatch):
 
     assert (
         container_manifests.reconcile_manifest(
-            canonical, records, ["linux/amd64", "linux/arm64"]
+            canonical,
+            records,
+            [ContainerPlatform.LINUX_AMD64, ContainerPlatform.LINUX_ARM64],
         )
         is False
     )
@@ -174,8 +183,8 @@ def test_current_descriptors_normalizes_registry_platform_variants(monkeypatch):
     )
 
     assert container_manifests._current_descriptors(canonical, None) == {
-        "linux/amd64": "sha256:" + "a" * 64,
-        "linux/arm64": "sha256:" + "b" * 64,
+        ContainerPlatform.LINUX_AMD64: "sha256:" + "a" * 64,
+        ContainerPlatform.LINUX_ARM64: "sha256:" + "b" * 64,
     }
 
 
@@ -183,10 +192,16 @@ def test_reconcile_is_idempotent_with_registry_platform_variant(monkeypatch):
     canonical = "quay.io/biocontainers/samtools:1.20--0"
     records = [
         MulledImageRecord(
-            canonical, "linux/amd64", f"{canonical}-amd64", "sha256:" + "a" * 64
+            canonical,
+            ContainerPlatform.LINUX_AMD64,
+            f"{canonical}-amd64",
+            "sha256:" + "a" * 64,
         ),
         MulledImageRecord(
-            canonical, "linux/arm64", f"{canonical}-arm64", "sha256:" + "b" * 64
+            canonical,
+            ContainerPlatform.LINUX_ARM64,
+            f"{canonical}-arm64",
+            "sha256:" + "b" * 64,
         ),
     ]
     manifest = {
@@ -221,7 +236,9 @@ def test_reconcile_is_idempotent_with_registry_platform_variant(monkeypatch):
 
     assert (
         container_manifests.reconcile_manifest(
-            canonical, records, ["linux/amd64", "linux/arm64"]
+            canonical,
+            records,
+            [ContainerPlatform.LINUX_AMD64, ContainerPlatform.LINUX_ARM64],
         )
         is False
     )
@@ -232,18 +249,24 @@ def test_reconcile_publishes_and_verifies(monkeypatch):
     canonical = "quay.io/biocontainers/samtools:1.20--0"
     records = [
         MulledImageRecord(
-            canonical, "linux/amd64", f"{canonical}-amd64", "sha256:" + "a" * 64
+            canonical,
+            ContainerPlatform.LINUX_AMD64,
+            f"{canonical}-amd64",
+            "sha256:" + "a" * 64,
         ),
         MulledImageRecord(
-            canonical, "linux/arm64", f"{canonical}-arm64", "sha256:" + "b" * 64
+            canonical,
+            ContainerPlatform.LINUX_ARM64,
+            f"{canonical}-arm64",
+            "sha256:" + "b" * 64,
         ),
     ]
     current = iter(
         [
-            {"linux/amd64": "sha256:" + "a" * 64},
+            {ContainerPlatform.LINUX_AMD64: "sha256:" + "a" * 64},
             {
-                "linux/amd64": "sha256:" + "a" * 64,
-                "linux/arm64": "sha256:" + "b" * 64,
+                ContainerPlatform.LINUX_AMD64: "sha256:" + "a" * 64,
+                ContainerPlatform.LINUX_ARM64: "sha256:" + "b" * 64,
             },
         ]
     )
@@ -260,12 +283,14 @@ def test_reconcile_publishes_and_verifies(monkeypatch):
     )
 
     assert container_manifests.reconcile_manifest(
-        canonical, records, ["linux/amd64", "linux/arm64"]
+        canonical,
+        records,
+        [ContainerPlatform.LINUX_AMD64, ContainerPlatform.LINUX_ARM64],
     )
     assert published[0][0] == canonical
     assert {item.platform for item in published[0][1]} == {
-        "linux/amd64",
-        "linux/arm64",
+        ContainerPlatform.LINUX_AMD64,
+        ContainerPlatform.LINUX_ARM64,
     }
 
 
@@ -273,18 +298,21 @@ def test_reconcile_preserves_existing_arm64_when_only_amd64_is_updated(monkeypat
     canonical = "quay.io/biocontainers/samtools:1.20--0"
     records = [
         MulledImageRecord(
-            canonical, "linux/amd64", f"{canonical}-amd64", "sha256:" + "a" * 64
+            canonical,
+            ContainerPlatform.LINUX_AMD64,
+            f"{canonical}-amd64",
+            "sha256:" + "a" * 64,
         ),
     ]
     desired = {
-        "linux/amd64": "sha256:" + "a" * 64,
-        "linux/arm64": "sha256:" + "b" * 64,
+        ContainerPlatform.LINUX_AMD64: "sha256:" + "a" * 64,
+        ContainerPlatform.LINUX_ARM64: "sha256:" + "b" * 64,
     }
     current = iter(
         [
             {
-                "linux/amd64": "sha256:" + "0" * 64,
-                "linux/arm64": "sha256:" + "b" * 64,
+                ContainerPlatform.LINUX_AMD64: "sha256:" + "0" * 64,
+                ContainerPlatform.LINUX_ARM64: "sha256:" + "b" * 64,
             },
             desired,
         ]
@@ -302,12 +330,14 @@ def test_reconcile_preserves_existing_arm64_when_only_amd64_is_updated(monkeypat
     )
 
     assert container_manifests.reconcile_manifest(
-        canonical, records, ["linux/amd64", "linux/arm64"]
+        canonical,
+        records,
+        [ContainerPlatform.LINUX_AMD64, ContainerPlatform.LINUX_ARM64],
     )
     assert {item.platform: item.digest for item in published[0][1]} == desired
     assert {item.platform: item.source_ref for item in published[0][1]} == {
-        "linux/amd64": f"{canonical}-amd64",
-        "linux/arm64": canonical,
+        ContainerPlatform.LINUX_AMD64: f"{canonical}-amd64",
+        ContainerPlatform.LINUX_ARM64: canonical,
     }
 
 
@@ -315,18 +345,21 @@ def test_reconcile_preserves_existing_amd64_when_only_arm64_is_updated(monkeypat
     canonical = "quay.io/biocontainers/samtools:1.20--0"
     records = [
         MulledImageRecord(
-            canonical, "linux/arm64", f"{canonical}-arm64", "sha256:" + "b" * 64
+            canonical,
+            ContainerPlatform.LINUX_ARM64,
+            f"{canonical}-arm64",
+            "sha256:" + "b" * 64,
         ),
     ]
     desired = {
-        "linux/amd64": "sha256:" + "a" * 64,
-        "linux/arm64": "sha256:" + "b" * 64,
+        ContainerPlatform.LINUX_AMD64: "sha256:" + "a" * 64,
+        ContainerPlatform.LINUX_ARM64: "sha256:" + "b" * 64,
     }
     current = iter(
         [
             {
-                "linux/amd64": "sha256:" + "a" * 64,
-                "linux/arm64": "sha256:" + "0" * 64,
+                ContainerPlatform.LINUX_AMD64: "sha256:" + "a" * 64,
+                ContainerPlatform.LINUX_ARM64: "sha256:" + "0" * 64,
             },
             desired,
         ]
@@ -344,12 +377,14 @@ def test_reconcile_preserves_existing_amd64_when_only_arm64_is_updated(monkeypat
     )
 
     assert container_manifests.reconcile_manifest(
-        canonical, records, ["linux/amd64", "linux/arm64"]
+        canonical,
+        records,
+        [ContainerPlatform.LINUX_AMD64, ContainerPlatform.LINUX_ARM64],
     )
     assert {item.platform: item.digest for item in published[0][1]} == desired
     assert {item.platform: item.source_ref for item in published[0][1]} == {
-        "linux/amd64": canonical,
-        "linux/arm64": f"{canonical}-arm64",
+        ContainerPlatform.LINUX_AMD64: canonical,
+        ContainerPlatform.LINUX_ARM64: f"{canonical}-arm64",
     }
 
 
@@ -357,11 +392,14 @@ def test_reconcile_publishes_arm64_only_manifest(monkeypatch):
     canonical = "quay.io/biocontainers/samtools:1.20--0"
     records = [
         MulledImageRecord(
-            canonical, "linux/arm64", f"{canonical}-arm64", "sha256:" + "b" * 64
+            canonical,
+            ContainerPlatform.LINUX_ARM64,
+            f"{canonical}-arm64",
+            "sha256:" + "b" * 64,
         ),
     ]
     desired = {
-        "linux/arm64": "sha256:" + "b" * 64,
+        ContainerPlatform.LINUX_ARM64: "sha256:" + "b" * 64,
     }
     current = iter([None, desired])
     monkeypatch.setattr(
@@ -377,7 +415,9 @@ def test_reconcile_publishes_arm64_only_manifest(monkeypatch):
     )
 
     assert container_manifests.reconcile_manifest(
-        canonical, records, ["linux/amd64", "linux/arm64"]
+        canonical,
+        records,
+        [ContainerPlatform.LINUX_AMD64, ContainerPlatform.LINUX_ARM64],
     )
     assert {item.platform: item.digest for item in published[0][1]} == desired
 
@@ -392,7 +432,9 @@ def test_reconcile_rejects_manifest_with_no_available_images(monkeypatch):
 
     with pytest.raises(RuntimeError, match="No images are available"):
         container_manifests.reconcile_manifest(
-            canonical, [], ["linux/amd64", "linux/arm64"]
+            canonical,
+            [],
+            [ContainerPlatform.LINUX_AMD64, ContainerPlatform.LINUX_ARM64],
         )
 
 
@@ -400,15 +442,21 @@ def test_initial_publish_succeeds_when_no_manifest_exists(monkeypatch):
     canonical = "quay.io/biocontainers/samtools:1.20--0"
     records = [
         MulledImageRecord(
-            canonical, "linux/amd64", f"{canonical}-amd64", "sha256:" + "a" * 64
+            canonical,
+            ContainerPlatform.LINUX_AMD64,
+            f"{canonical}-amd64",
+            "sha256:" + "a" * 64,
         ),
         MulledImageRecord(
-            canonical, "linux/arm64", f"{canonical}-arm64", "sha256:" + "b" * 64
+            canonical,
+            ContainerPlatform.LINUX_ARM64,
+            f"{canonical}-arm64",
+            "sha256:" + "b" * 64,
         ),
     ]
     desired = {
-        "linux/amd64": "sha256:" + "a" * 64,
-        "linux/arm64": "sha256:" + "b" * 64,
+        ContainerPlatform.LINUX_AMD64: "sha256:" + "a" * 64,
+        ContainerPlatform.LINUX_ARM64: "sha256:" + "b" * 64,
     }
     current = iter([None, desired])
     monkeypatch.setattr(
@@ -424,7 +472,9 @@ def test_initial_publish_succeeds_when_no_manifest_exists(monkeypatch):
     )
 
     assert container_manifests.reconcile_manifest(
-        canonical, records, ["linux/amd64", "linux/arm64"]
+        canonical,
+        records,
+        [ContainerPlatform.LINUX_AMD64, ContainerPlatform.LINUX_ARM64],
     )
     assert len(published) == 1
 
@@ -437,7 +487,7 @@ def test_publish_single_platform_creates_index(monkeypatch):
         lambda command, **_kwargs: commands.append(command),
     )
     descriptor = ManifestDescriptor(
-        "linux/amd64",
+        ContainerPlatform.LINUX_AMD64,
         "sha256:" + "a" * 64,
         "quay.io/biocontainers/samtools:1.20--0-amd64",
     )
@@ -466,7 +516,7 @@ def test_publish_manifest_injects_docker_config_when_creds_provided(monkeypatch)
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
-        "linux/amd64",
+        ContainerPlatform.LINUX_AMD64,
         "sha256:" + "a" * 64,
         "quay.io/biocontainers/samtools:1.20--0-amd64",
     )
@@ -496,7 +546,7 @@ def test_publish_manifest_cleans_up_docker_config_on_failure(monkeypatch):
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
-        "linux/amd64",
+        ContainerPlatform.LINUX_AMD64,
         "sha256:" + "a" * 64,
         "quay.io/biocontainers/samtools:1.20--0-amd64",
     )
@@ -521,7 +571,7 @@ def test_publish_manifest_handles_oauth_token_format(monkeypatch):
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
-        "linux/amd64",
+        ContainerPlatform.LINUX_AMD64,
         "sha256:" + "a" * 64,
         "quay.io/biocontainers/samtools:1.20--0-amd64",
     )
@@ -539,7 +589,7 @@ def test_publish_manifest_handles_oauth_token_format(monkeypatch):
 
 def test_publish_manifest_rejects_malformed_creds(monkeypatch):
     descriptor = ManifestDescriptor(
-        "linux/amd64",
+        ContainerPlatform.LINUX_AMD64,
         "sha256:" + "a" * 64,
         "quay.io/biocontainers/samtools:1.20--0-amd64",
     )
@@ -561,7 +611,7 @@ def test_publish_manifest_without_creds_omits_docker_config(monkeypatch):
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
-        "linux/amd64",
+        ContainerPlatform.LINUX_AMD64,
         "sha256:" + "a" * 64,
         "quay.io/biocontainers/samtools:1.20--0-amd64",
     )
@@ -599,7 +649,7 @@ def test_publish_manifest_preserves_user_docker_config(monkeypatch, tmp_path):
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
-        "linux/amd64",
+        ContainerPlatform.LINUX_AMD64,
         "sha256:" + "a" * 64,
         "quay.io/biocontainers/samtools:1.20--0-amd64",
     )
@@ -649,7 +699,7 @@ def test_publish_manifest_overrides_existing_auth_for_target_host(
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
-        "linux/amd64",
+        ContainerPlatform.LINUX_AMD64,
         "sha256:" + "a" * 64,
         "quay.io/biocontainers/samtools:1.20--0-amd64",
     )
@@ -678,7 +728,7 @@ def test_publish_manifest_handles_missing_user_docker_config(monkeypatch, tmp_pa
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
-        "linux/amd64",
+        ContainerPlatform.LINUX_AMD64,
         "sha256:" + "a" * 64,
         "quay.io/biocontainers/samtools:1.20--0-amd64",
     )
@@ -714,7 +764,7 @@ def test_publish_manifest_warns_and_proceeds_on_malformed_user_config(
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
-        "linux/amd64",
+        ContainerPlatform.LINUX_AMD64,
         "sha256:" + "a" * 64,
         "quay.io/biocontainers/samtools:1.20--0-amd64",
     )
@@ -750,7 +800,7 @@ def test_publish_manifest_ignores_non_object_user_config(monkeypatch, tmp_path, 
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
-        "linux/amd64",
+        ContainerPlatform.LINUX_AMD64,
         "sha256:" + "a" * 64,
         "quay.io/biocontainers/samtools:1.20--0-amd64",
     )

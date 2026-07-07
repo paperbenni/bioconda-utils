@@ -6,6 +6,7 @@ from github.CheckRun import CheckRun
 from github.Repository import Repository
 
 from bioconda_utils import _types, artifacts
+from bioconda_utils._types import ContainerPlatform, PackageSubdir
 from bioconda_utils.container_manifests import MulledImageRecord
 
 BIOCONTAINERS = _types.QuayUploadTarget("biocontainers")
@@ -74,7 +75,7 @@ def test_get_gha_artifact_urls_filters_to_package_platform():
 
     urls = list(
         artifacts.get_gha_artifact_urls(
-            cast(CheckRun, _CheckRun()), "linux-aarch64", repo
+            cast(CheckRun, _CheckRun()), PackageSubdir.LINUX_AARCH64, repo
         )
     )
 
@@ -100,7 +101,9 @@ def test_get_gha_artifact_urls_accepts_legacy_x86_names():
     )
 
     urls = list(
-        artifacts.get_gha_artifact_urls(cast(CheckRun, _CheckRun()), "linux-64", repo)
+        artifacts.get_gha_artifact_urls(
+            cast(CheckRun, _CheckRun()), PackageSubdir.LINUX_64, repo
+        )
     )
 
     assert urls == ["linux-url", "linux-64-url"]
@@ -142,7 +145,9 @@ def test_upload_pr_artifacts_filters_packages_and_arm64_images(monkeypatch, tmp_
         artifacts,
         "inspect_image_platform",
         lambda source_ref: (
-            "linux/arm64" if source_ref.endswith("-arm64.tar.gz") else "linux/amd64"
+            ContainerPlatform.LINUX_ARM64
+            if source_ref.endswith("-arm64.tar.gz")
+            else ContainerPlatform.LINUX_AMD64
         ),
     )
 
@@ -166,8 +171,8 @@ def test_upload_pr_artifacts_filters_packages_and_arm64_images(monkeypatch, tmp_
         "abc123",
         mulled_upload_target=BIOCONTAINERS,
         artifact_source="github-actions",
-        package_platform="linux-aarch64",
-        container_platforms=["linux/arm64"],
+        package_platform=PackageSubdir.LINUX_AARCH64,
+        container_platforms=[ContainerPlatform.LINUX_ARM64],
     )
 
     assert result == artifacts.UploadResult.SUCCESS
@@ -179,7 +184,7 @@ def test_upload_pr_artifacts_filters_packages_and_arm64_images(monkeypatch, tmp_
         (
             uploaded_sources[0][0],
             "quay.io/biocontainers/samtools:1.0--0",
-            "linux/arm64",
+            ContainerPlatform.LINUX_ARM64,
         )
     ]
 
@@ -209,7 +214,7 @@ def test_upload_pr_artifacts_returns_no_artifacts_when_nothing_matches(
         "bioconda/bioconda-recipes",
         "abc123",
         artifact_source="github-actions",
-        package_platform="linux-aarch64",
+        package_platform=PackageSubdir.LINUX_AARCH64,
     )
 
     assert result == artifacts.UploadResult.NO_ARTIFACTS
@@ -239,7 +244,7 @@ def test_upload_pr_artifacts_dryrun_counts_matching_artifacts(monkeypatch, tmp_p
         "abc123",
         dryrun=True,
         artifact_source="github-actions",
-        package_platform="linux-aarch64",
+        package_platform=PackageSubdir.LINUX_AARCH64,
     )
 
     assert result == artifacts.UploadResult.SUCCESS
@@ -249,7 +254,10 @@ def test_mulled_artifact_target_platform_allows_ambient_registry_auth(monkeypatc
     monkeypatch.delenv("QUAY_LOGIN", raising=False)
     monkeypatch.delenv("QUAY_OAUTH_TOKEN", raising=False)
 
-    assert artifacts._mulled_artifact_target_platform(["linux/arm64"]) == "linux/arm64"
+    assert (
+        artifacts._mulled_artifact_target_platform([ContainerPlatform.LINUX_ARM64])
+        == ContainerPlatform.LINUX_ARM64
+    )
 
 
 def test_upload_pr_artifacts_uses_archive_platform_not_filename(monkeypatch, tmp_path):
@@ -279,7 +287,7 @@ def test_upload_pr_artifacts_uses_archive_platform_not_filename(monkeypatch, tmp
     monkeypatch.setattr(
         artifacts,
         "inspect_image_platform",
-        lambda _source_ref: "linux/amd64",
+        lambda _source_ref: ContainerPlatform.LINUX_AMD64,
     )
     monkeypatch.setattr(
         artifacts,
@@ -292,8 +300,8 @@ def test_upload_pr_artifacts_uses_archive_platform_not_filename(monkeypatch, tmp
         "abc123",
         mulled_upload_target=BIOCONTAINERS,
         artifact_source="github-actions",
-        package_platform="linux-aarch64",
-        container_platforms=["linux/arm64"],
+        package_platform=PackageSubdir.LINUX_AARCH64,
+        container_platforms=[ContainerPlatform.LINUX_ARM64],
     )
 
     assert result == artifacts.UploadResult.FAILURE

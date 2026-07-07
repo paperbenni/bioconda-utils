@@ -5,7 +5,7 @@
 # changed, may indicate binary incompatibility. Expected 96, got 88"
 import warnings
 import logging
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal
 
 import typer
 import click
@@ -64,7 +64,6 @@ app = typer.Typer(
     rich_markup_mode=None,
 )
 logger = logging.getLogger(__name__)
-CONTAINER_PLATFORM_CHOICE = cast(Any, click.Choice(CONTAINER_PLATFORMS))
 
 # A package is the name of the software package, like `bowtie`.
 #
@@ -495,11 +494,10 @@ def build(
         ),
     ] = False,
     container_platform: Annotated[
-        list[str] | None,
+        list[ContainerPlatform] | None,
         typer.Option(
             "--container-platform",
             help="Docker platform to build, test, or push for mulled containers. May be repeated.",
-            click_type=CONTAINER_PLATFORM_CHOICE,
         ),
     ] = None,
     mulled_upload_records: Annotated[
@@ -549,13 +547,12 @@ def build(
     recipes = get_recipes(cfg, recipe_folder, package_patterns, parsed_git_range)
     if platform and not docker:
         raise typer.BadParameter("requires --docker", param_hint="--platform")
-    typed_container_platform = cast(list[ContainerPlatform] | None, container_platform)
-    if docker and platform and typed_container_platform is None:
-        typed_container_platform = [platform]
+    if docker and platform and container_platform is None:
+        container_platform = [platform]
     _validate_container_platforms_for_build(
         docker=docker,
         platform=platform,
-        container_platform=typed_container_platform,
+        container_platform=container_platform,
     )
     if docker:
         if build_script_template is not None:
@@ -618,7 +615,7 @@ def build(
         subdag_depth=subdag_depth,
         presolved_mulled_build_and_test=presolved_mulled_test,
         fast_resolve=not no_fast_resolve,
-        container_platforms=typed_container_platform,
+        container_platforms=container_platform,
         mulled_upload_records=mulled_upload_records,
         use_existing_auth=use_existing_auth,
     )
@@ -1537,11 +1534,10 @@ def handle_merged_pr(
         ),
     ] = "azure",
     container_platform: Annotated[
-        list[str] | None,
+        list[ContainerPlatform] | None,
         typer.Option(
             "--container-platform",
             help="Docker platform to build, test, or push for mulled containers. May be repeated.",
-            click_type=CONTAINER_PLATFORM_CHOICE,
         ),
     ] = None,
     package_platform: Annotated[
@@ -1578,7 +1574,6 @@ def handle_merged_pr(
     if git_range is None:
         raise ValueError("git_range is required")
     parsed_git_range = GitRange.parse(git_range)
-    typed_container_platform = cast(list[ContainerPlatform] | None, container_platform)
     parsed_upload_target = _parse_quay_upload_target(quay_upload_target)
     mulled_upload_records = _resolve_mulled_upload_records(
         mulled_upload_records, parsed_upload_target
@@ -1591,7 +1586,7 @@ def handle_merged_pr(
         label=label,
         artifact_source=artifact_source,
         package_platform=package_platform,
-        container_platforms=typed_container_platform,
+        container_platforms=container_platform,
         mulled_upload_records=mulled_upload_records,
         use_existing_auth=use_existing_auth,
     )
@@ -1610,7 +1605,7 @@ def handle_merged_pr(
             anaconda_upload=not dry_run,
             mulled_upload_target=parsed_upload_target if not dry_run else None,
             mulled_test=True,
-            container_platform=cast(list[str] | None, typed_container_platform),
+            container_platform=container_platform,
             mulled_upload_records=mulled_upload_records,
             use_existing_auth=use_existing_auth,
         )
@@ -1628,11 +1623,10 @@ def create_mulled_manifests(
         ),
     ] = None,
     platform: Annotated[
-        list[str] | None,
+        list[ContainerPlatform] | None,
         typer.Option(
             "--platform",
             help="Platforms to include. Defaults to all supported platforms.",
-            click_type=CONTAINER_PLATFORM_CHOICE,
         ),
     ] = None,
     use_existing_auth: Annotated[
@@ -1666,9 +1660,7 @@ def create_mulled_manifests(
         return
     changed, total = reconcile_manifests(
         records,
-        cast(list[ContainerPlatform], platform)
-        if platform
-        else list(CONTAINER_PLATFORMS),
+        platform or list(CONTAINER_PLATFORMS),
         creds=resolve_registry_creds(use_existing_auth=use_existing_auth),
     )
     logger.info("Manifest summary: %d changed, %d checked", changed, total)

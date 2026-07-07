@@ -144,6 +144,27 @@ def _parse_git_range(value: str) -> GitRange:
         raise typer.BadParameter(str(exc)) from exc
 
 
+def _parse_git_range_if_needed(git_range: str | None) -> GitRange | None:
+    if git_range is None:
+        return None
+    return _parse_git_range(git_range)
+
+
+def _handle_pdb_exception(command_name: str, pdb: bool) -> bool:
+    """Log exception and optionally enter debugger.
+
+    Returns True if pdb was entered (caller should return),
+    False if caller should re-raise.
+    """
+    logger.exception(f"{command_name} command failed")
+    if pdb:
+        import pdb as debugger
+
+        debugger.post_mortem()
+        return True
+    return False
+
+
 LoglevelOpt = Annotated[
     LogLevel,
     typer.Option(
@@ -211,6 +232,27 @@ GitRangeOpt = Annotated[
             "Select changes on REF since its merge base with BASE. "
             "BASE alone means BASE...HEAD."
         ),
+    ),
+]
+ContainerPlatformOpt = Annotated[
+    list[ContainerPlatform] | None,
+    typer.Option(
+        "--container-platform",
+        help="Docker platform to build, test, or push for mulled containers. May be repeated.",
+    ),
+]
+UseExistingAuthOpt = Annotated[
+    bool,
+    typer.Option(
+        "--use-existing-auth",
+        help="Use existing Docker or skopeo registry authentication when Quay credentials are unset.",
+    ),
+]
+MulledUploadRecordsOpt = Annotated[
+    Path | None,
+    typer.Option(
+        "--mulled-upload-records",
+        help="Append uploaded mulled image records as JSONL for manifest publication.",
     ),
 ]
 
@@ -488,27 +530,9 @@ def build(
             help="Disable fast resolve: always run the full finalized conda solver on the host, even when building with Docker. Useful for debugging build string mismatches.",
         ),
     ] = False,
-    container_platform: Annotated[
-        list[ContainerPlatform] | None,
-        typer.Option(
-            "--container-platform",
-            help="Docker platform to build, test, or push for mulled containers. May be repeated.",
-        ),
-    ] = None,
-    mulled_upload_records: Annotated[
-        Path | None,
-        typer.Option(
-            "--mulled-upload-records",
-            help="Append uploaded mulled image records as JSONL for manifest publication.",
-        ),
-    ] = None,
-    use_existing_auth: Annotated[
-        bool,
-        typer.Option(
-            "--use-existing-auth",
-            help="Use existing Docker or skopeo registry authentication when Quay credentials are unset.",
-        ),
-    ] = False,
+    container_platform: ContainerPlatformOpt = None,
+    mulled_upload_records: MulledUploadRecordsOpt = None,
+    use_existing_auth: UseExistingAuthOpt = False,
     exclude: Annotated[
         list[str] | None,
         typer.Option("--exclude", help="Packages to exclude during this run"),
@@ -532,7 +556,7 @@ def build(
         mulled_upload_records, parsed_upload_target
     )
     package_patterns: PackagePatterns = packages or "*"
-    parsed_git_range = _parse_git_range(git_range) if git_range is not None else None
+    parsed_git_range = _parse_git_range_if_needed(git_range)
     cfg = utils.load_config(config)
     setup = cfg.get("setup", None)
     if setup:
@@ -777,9 +801,7 @@ def lint(
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
     package_patterns: PackagePatterns = packages or "*"
     try:
-        parsed_git_range = (
-            _parse_git_range(git_range) if git_range is not None else None
-        )
+        parsed_git_range = _parse_git_range_if_needed(git_range)
         if list_checks:
             print("\n".join((str(check) for check in _lint.get_checks())))
             sys.exit(0)
@@ -808,11 +830,7 @@ def lint(
         else:
             sys.exit("Errors were found")
     except Exception:
-        logger.exception("Lint command failed")
-        if pdb:
-            import pdb as debugger
-
-            debugger.post_mortem()
+        if _handle_pdb_exception("Lint", pdb):
             return None
         raise
 
@@ -1040,11 +1058,7 @@ def update_pinning(
                 f"The build numbers in the following recipes could not be incremented: {list(bumpErrors)}"
             )
     except Exception:
-        logger.exception("Update-pinning command failed")
-        if pdb:
-            import pdb as debugger
-
-            debugger.post_mortem()
+        if _handle_pdb_exception("Update-pinning", pdb):
             return None
         raise
 
@@ -1485,11 +1499,7 @@ def autobump(
         if git_handler:
             git_handler.close()
     except Exception:
-        logger.exception("Autobump command failed")
-        if pdb:
-            import pdb as debugger
-
-            debugger.post_mortem()
+        if _handle_pdb_exception("Autobump", pdb):
             return None
         raise
 
@@ -1529,13 +1539,7 @@ def handle_merged_pr(
             help="Application hosting build artifacts (e.g., Azure, Circle CI, or GitHub Actions).",
         ),
     ] = "azure",
-    container_platform: Annotated[
-        list[ContainerPlatform] | None,
-        typer.Option(
-            "--container-platform",
-            help="Docker platform to build, test, or push for mulled containers. May be repeated.",
-        ),
-    ] = None,
+    container_platform: ContainerPlatformOpt = None,
     package_platform: Annotated[
         PackageSubdir | None,
         typer.Option(
@@ -1543,20 +1547,8 @@ def handle_merged_pr(
             help="Conda package platform to upload from PR artifacts. Defaults to the native platform.",
         ),
     ] = None,
-    mulled_upload_records: Annotated[
-        Path | None,
-        typer.Option(
-            "--mulled-upload-records",
-            help="Append uploaded mulled image records as JSONL for manifest publication.",
-        ),
-    ] = None,
-    use_existing_auth: Annotated[
-        bool,
-        typer.Option(
-            "--use-existing-auth",
-            help="Use existing Docker or skopeo registry authentication when Quay credentials are unset.",
-        ),
-    ] = False,
+    mulled_upload_records: MulledUploadRecordsOpt = None,
+    use_existing_auth: UseExistingAuthOpt = False,
     loglevel: LoglevelOpt = "info",
     logfile: LogfileOpt = None,
     logfile_level: LogfileLevelOpt = "debug",
@@ -1625,13 +1617,7 @@ def create_mulled_manifests(
             help="Platforms to include. Defaults to all supported platforms.",
         ),
     ] = None,
-    use_existing_auth: Annotated[
-        bool,
-        typer.Option(
-            "--use-existing-auth",
-            help="Use existing Docker or skopeo registry authentication when Quay credentials are unset.",
-        ),
-    ] = False,
+    use_existing_auth: UseExistingAuthOpt = False,
     loglevel: LoglevelOpt = "info",
     logfile: LogfileOpt = None,
     logfile_level: LogfileLevelOpt = "debug",
@@ -1757,7 +1743,7 @@ def list_build_failures(
 ) -> None:
     """List recipes with build failure records"""
     config_data = utils.load_config(config)
-    parsed_git_range = _parse_git_range(git_range) if git_range is not None else None
+    parsed_git_range = _parse_git_range_if_needed(git_range)
     df = collect_build_failure_dataframe(
         recipe_folder,
         config_data,

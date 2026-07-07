@@ -40,7 +40,7 @@ from . import graph
 from . import pkg_test
 from .githandler import BiocondaRepo, GitRange, install_gpg_key
 from ._types import (
-    CONTAINER_PLATFORMS,
+    ALL_CONTAINER_PLATFORMS,
     ContainerPlatform,
     PackageSubdir,
     QuayUploadTarget,
@@ -76,8 +76,7 @@ PackagePatterns = str | list[str]
 # Shared CLI parameter type aliases
 
 
-def _validate_path_exists(value: str | Path) -> Path:
-    value = Path(value)
+def _validate_path_exists(value: Path) -> Path:
     if not value.exists():
         raise typer.BadParameter(f"path '{value}' does not exist")
     return value
@@ -138,13 +137,11 @@ def _validate_positive_int(value: int) -> int:
     return value
 
 
-def _validate_git_range(value: str | None) -> str | None:
-    if value is not None:
-        try:
-            GitRange.parse(value)
-        except ValueError as exc:
-            raise typer.BadParameter(str(exc)) from exc
-    return value
+def _parse_git_range(value: str) -> GitRange:
+    try:
+        return GitRange.parse(value)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 LoglevelOpt = Annotated[
@@ -164,7 +161,7 @@ LogCommandMaxLinesOpt = Annotated[
     ),
 ]
 RecipeFolderArg = Annotated[
-    str,
+    Path,
     typer.Argument(
         help="Path to folder containing recipes (default: recipes/)",
         callback=_validate_path_exists,
@@ -179,7 +176,7 @@ ConfigArg = Annotated[
 ]
 # Lint defers path validation so --list-checks can run without a recipe checkout.
 LintRecipeFolderArg = Annotated[
-    str,
+    Path,
     typer.Argument(help="Path to folder containing recipes (default: recipes/)"),
 ]
 LintConfigArg = Annotated[
@@ -210,7 +207,6 @@ GitRangeOpt = Annotated[
     typer.Option(
         "--git-range",
         metavar="BASE[...REF]",
-        callback=_validate_git_range,
         help=(
             "Select changes on REF since its merge base with BASE. "
             "BASE alone means BASE...HEAD."
@@ -219,7 +215,7 @@ GitRangeOpt = Annotated[
 ]
 
 
-def get_recipes_to_build(git_range: GitRange, recipe_folder: str) -> list[str]:
+def get_recipes_to_build(git_range: GitRange, recipe_folder: Path) -> list[str]:
     """Gets list of modified recipes according to git_range and blacklist
 
     See `BiocondaRepoMixin.get_recipes_to_build()`.
@@ -230,13 +226,13 @@ def get_recipes_to_build(git_range: GitRange, recipe_folder: str) -> list[str]:
       List of recipes for which meta.yaml or build.sh was modified or
       which were unblacklisted.
     """
-    repo = BiocondaRepo(recipe_folder)
+    repo = BiocondaRepo(str(recipe_folder))
     return repo.get_recipes_to_build(git_range.ref, git_range.base)
 
 
 def get_recipes(
     config: dict[str, Any],
-    recipe_folder: str,
+    recipe_folder: Path,
     packages: PackagePatterns,
     git_range: GitRange | None,
     include_blacklisted: bool = False,
@@ -248,28 +244,29 @@ def get_recipes(
     removes blacklisted recipes (unless include_blacklisted=True).
 
     """
-    recipes = list(utils.get_recipes(recipe_folder, packages))
+    recipe_folder_str = str(recipe_folder)
+    recipes = list(utils.get_recipes(recipe_folder_str, packages))
     logger.info(
         "Considering total of %s recipes%s.",
         len(recipes),
-        utils.ellipsize_recipes(recipes, recipe_folder),
+        utils.ellipsize_recipes(recipes, recipe_folder_str),
     )
     if git_range:
         changed_recipes = get_recipes_to_build(git_range, recipe_folder)
         logger.info(
             "Constraining to %s git modified recipes%s.",
             len(changed_recipes),
-            utils.ellipsize_recipes(changed_recipes, recipe_folder),
+            utils.ellipsize_recipes(changed_recipes, recipe_folder_str),
         )
         recipes = [recipe for recipe in recipes if recipe in set(changed_recipes)]
         if len(recipes) != len(changed_recipes):
             logger.info(
                 "Overlap was %s recipes%s.",
                 len(recipes),
-                utils.ellipsize_recipes(recipes, recipe_folder),
+                utils.ellipsize_recipes(recipes, recipe_folder_str),
             )
     if not include_blacklisted:
-        skiplist = Skiplist(config, recipe_folder)
+        skiplist = Skiplist(config, recipe_folder_str)
         all_len = len(recipes)
         recipes = [recipe for recipe in recipes if not skiplist.is_skiplisted(recipe)]
         if all_len > len(recipes):
@@ -277,7 +274,7 @@ def get_recipes(
     logger.info(
         "Processing %s recipes%s.",
         len(recipes),
-        utils.ellipsize_recipes(recipes, recipe_folder),
+        utils.ellipsize_recipes(recipes, recipe_folder_str),
     )
     return recipes
 
@@ -320,9 +317,9 @@ def root(
 @app.command("build")
 def build(
     recipe_folder: Annotated[
-        str,
+        Path,
         typer.Argument(help="Path to folder containing recipes (default: recipes/)"),
-    ] = "recipes/",
+    ] = Path("recipes/"),
     config: Annotated[
         Path, typer.Argument(help="Path to Bioconda config (default: config.yml)")
     ] = Path("config.yml"),
@@ -386,7 +383,6 @@ def build(
         typer.Option(
             "--mulled-upload-target",
             help="Provide a quay.io target to push mulled docker images to.",
-            callback=_parse_quay_upload_target,
         ),
     ] = None,
     build_image: Annotated[
@@ -537,7 +533,7 @@ def build(
         mulled_upload_records, parsed_upload_target
     )
     package_patterns: PackagePatterns = packages or "*"
-    parsed_git_range = GitRange.parse(git_range) if git_range is not None else None
+    parsed_git_range = _parse_git_range(git_range) if git_range is not None else None
     cfg = utils.load_config(config)
     setup = cfg.get("setup", None)
     if setup:
@@ -591,7 +587,7 @@ def build(
         logger.warning("--lint-exclude has no effect unless --lint is specified.")
     label = os.getenv("BIOCONDA_LABEL", None) or None
     success = build_recipes(
-        recipe_folder,
+        str(recipe_folder),
         cfg,
         recipes,
         testonly=test_only,
@@ -624,7 +620,7 @@ def build(
 
 @app.command("dag")
 def dag(
-    recipe_folder: RecipeFolderArg = "recipes/",
+    recipe_folder: RecipeFolderArg = Path("recipes/"),
     config: ConfigArg = Path("config.yml"),
     packages: PackagesOpt = None,
     format: Annotated[
@@ -686,7 +682,7 @@ def dag(
 
 @app.command("dependent")
 def dependent(
-    recipe_folder: RecipeFolderArg = "recipes/",
+    recipe_folder: RecipeFolderArg = Path("recipes/"),
     config: ConfigArg = Path("config.yml"),
     restrict: Annotated[
         bool,
@@ -742,7 +738,7 @@ def dependent(
 
 @app.command("lint")
 def lint(
-    recipe_folder: LintRecipeFolderArg = "recipes/",
+    recipe_folder: LintRecipeFolderArg = Path("recipes/"),
     config: LintConfigArg = Path("config.yml"),
     packages: PackagesOpt = None,
     cache: Annotated[
@@ -782,12 +778,14 @@ def lint(
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
     package_patterns: PackagePatterns = packages or "*"
     try:
+        parsed_git_range = (
+            _parse_git_range(git_range) if git_range is not None else None
+        )
         if list_checks:
             print("\n".join((str(check) for check in _lint.get_checks())))
             sys.exit(0)
         _validate_path_exists(recipe_folder)
         _validate_path_exists(config)
-        parsed_git_range = GitRange.parse(git_range) if git_range is not None else None
         config_data = utils.load_config(config)
         if cache is not None:
             utils.RepoData().set_cache(cache)
@@ -798,7 +796,7 @@ def lint(
             parsed_git_range,
             include_blacklisted=True,
         )
-        linter = _lint.Linter(config_data, recipe_folder, exclude)
+        linter = _lint.Linter(config_data, str(recipe_folder), exclude)
         result = linter.lint(recipes, fix=try_fix)
         messages = linter.get_messages()
         if messages:
@@ -924,7 +922,7 @@ def duplicates(
 
 @app.command("update-pinning")
 def update_pinning(
-    recipe_folder: RecipeFolderArg = "recipes/",
+    recipe_folder: RecipeFolderArg = Path("recipes/"),
     config: ConfigArg = Path("config.yml"),
     packages: PackagesOpt = None,
     skip_additional_channels: Annotated[
@@ -980,7 +978,7 @@ def update_pinning(
             utils.RepoData().set_cache(cache)
         utils.RepoData().df
         build_config = utils.load_conda_build_config()
-        skiplist = Skiplist(config_data, recipe_folder)
+        skiplist = Skiplist(config_data, str(recipe_folder))
         from . import recipe
 
         dag = graph.build_from_recipes(
@@ -1054,7 +1052,7 @@ def update_pinning(
 
 @app.command("bioconductor-skeleton")
 def bioconductor_skeleton(
-    recipe_folder: RecipeFolderArg = "recipes/",
+    recipe_folder: RecipeFolderArg = Path("recipes/"),
     config: ConfigArg = Path("config.yml"),
     packages: PackagesOpt = None,
     update_all: Annotated[
@@ -1226,7 +1224,7 @@ def clean_cran_skeleton(
 
 @app.command("autobump")
 def autobump(
-    recipe_folder: RecipeFolderArg = "recipes/",
+    recipe_folder: RecipeFolderArg = Path("recipes/"),
     config: ConfigArg = Path("config.yml"),
     packages: PackagesOpt = None,
     exclude: Annotated[
@@ -1362,6 +1360,7 @@ def autobump(
     package_patterns: PackagePatterns = packages or "*"
     excluded_channels = exclude_channels or ["conda-forge"]
     use_default_signing_key = sign and sign_key is None
+    recipe_folder_str = str(recipe_folder)
     try:
         # load and register config
         config_dict = utils.load_config(config)
@@ -1371,11 +1370,11 @@ def autobump(
 
         if no_follow_graph:
             recipe_source = autobump.RecipeSource(
-                recipe_folder, package_patterns, exclude or [], not no_shuffle
+                recipe_folder_str, package_patterns, exclude or [], not no_shuffle
             )
         else:
             recipe_source = autobump.RecipeGraphSource(
-                recipe_folder,
+                recipe_folder_str,
                 package_patterns,
                 exclude or [],
                 not no_shuffle,
@@ -1413,7 +1412,7 @@ def autobump(
         if check_branch or create_branch or create_pr or only_active:
             # We need to take the recipe from the git repo. This
             # loads the bump/<recipe> branch if available
-            git_handler = BiocondaRepo(recipe_folder, dry_run)
+            git_handler = BiocondaRepo(recipe_folder_str, dry_run)
             git_handler.checkout_master()
             if only_active:
                 scanner.add(autobump.ExcludeNoActiveUpdate, git_handler)
@@ -1499,7 +1498,7 @@ def autobump(
 
 @app.command("handle-merged-pr")
 def handle_merged_pr(
-    recipe_folder: RecipeFolderArg = "recipes/",
+    recipe_folder: RecipeFolderArg = Path("recipes/"),
     config: ConfigArg = Path("config.yml"),
     repo: Annotated[
         str | None,
@@ -1523,7 +1522,6 @@ def handle_merged_pr(
         typer.Option(
             "--quay-upload-target",
             help="Provide a quay.io target to push docker images to.",
-            callback=_parse_quay_upload_target,
         ),
     ] = None,
     artifact_source: Annotated[
@@ -1573,7 +1571,7 @@ def handle_merged_pr(
         raise ValueError("repo is required")
     if git_range is None:
         raise ValueError("git_range is required")
-    parsed_git_range = GitRange.parse(git_range)
+    parsed_git_range = _parse_git_range(git_range)
     parsed_upload_target = _parse_quay_upload_target(quay_upload_target)
     mulled_upload_records = _resolve_mulled_upload_records(
         mulled_upload_records, parsed_upload_target
@@ -1660,7 +1658,7 @@ def create_mulled_manifests(
         return
     changed, total = reconcile_manifests(
         records,
-        platform or list(CONTAINER_PLATFORMS),
+        platform or list(ALL_CONTAINER_PLATFORMS),
         creds=resolve_registry_creds(use_existing_auth=use_existing_auth),
     )
     logger.info("Manifest summary: %d changed, %d checked", changed, total)
@@ -1745,7 +1743,7 @@ def annotate_build_failures(
 # list how many recipes depend on this and sort by it primarily if inner
 @app.command("list-build-failures")
 def list_build_failures(
-    recipe_folder: RecipeFolderArg = "recipes/",
+    recipe_folder: RecipeFolderArg = Path("recipes/"),
     config: ConfigArg = Path("config.yml"),
     channel: Annotated[
         str, typer.Option("--channel", help="Channel with packages to check")
@@ -1761,9 +1759,9 @@ def list_build_failures(
 ) -> None:
     """List recipes with build failure records"""
     config_data = utils.load_config(config)
-    parsed_git_range = GitRange.parse(git_range) if git_range is not None else None
+    parsed_git_range = _parse_git_range(git_range) if git_range is not None else None
     df = collect_build_failure_dataframe(
-        recipe_folder,
+        str(recipe_folder),
         config_data,
         channel,
         link_fmt=output_format,

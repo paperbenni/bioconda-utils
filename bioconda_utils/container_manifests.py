@@ -22,7 +22,7 @@ from .utils import (
     parse_oci_config_platform,
 )
 from ._types import (
-    CONTAINER_PLATFORMS,
+    ALL_CONTAINER_PLATFORMS,
     ContainerPlatform,
     docker_platform_staging_suffix,
     normalize_container_platform,
@@ -337,7 +337,7 @@ def _publish_manifest(
 def reconcile_manifest(
     canonical_ref: str,
     records: list[MulledImageRecord],
-    platforms: Iterable[ContainerPlatform] = CONTAINER_PLATFORMS,
+    platforms: Iterable[ContainerPlatform] = ALL_CONTAINER_PLATFORMS,
     *,
     creds: str | None = None,
 ) -> bool:
@@ -399,7 +399,7 @@ def reconcile_manifest(
 
 def reconcile_manifests(
     records: Iterable[MulledImageRecord],
-    platforms: Iterable[ContainerPlatform] = CONTAINER_PLATFORMS,
+    platforms: Iterable[ContainerPlatform] = ALL_CONTAINER_PLATFORMS,
     *,
     creds: str | None = None,
 ) -> tuple[int, int]:

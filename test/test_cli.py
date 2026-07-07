@@ -113,6 +113,15 @@ def test_cli_rejects_two_dot_git_range(monkeypatch):
     assert "main...HEAD" not in result.output
 
 
+def test_cli_rejects_invalid_quay_target_before_building():
+    result = runner.invoke(
+        cli.app, ["build", "--mulled-upload-target", "namespace/repository"]
+    )
+
+    assert result.exit_code == 2
+    assert "must be a single quay.io namespace" in result.output
+
+
 def test_recipe_selection_uses_range_base_and_ref(monkeypatch):
     calls = []
 
@@ -126,7 +135,9 @@ def test_recipe_selection_uses_range_base_and_ref(monkeypatch):
 
     monkeypatch.setattr(cli, "BiocondaRepo", Repo)
 
-    result = cli.get_recipes_to_build(cli.GitRange.parse("main...feature"), "recipes")
+    result = cli.get_recipes_to_build(
+        cli.GitRange.parse("main...feature"), Path("recipes")
+    )
 
     assert result == ["recipes/example"]
     assert calls == [("feature", "main")]
@@ -136,13 +147,23 @@ def test_build_parses_typed_and_repeated_options():
     command = cast(Any, get_command(cli.app)).commands["build"]
 
     context = command.make_context(
-        "build", ["--docker", "--packages", "one", "--packages", "two"]
+        "build",
+        [
+            "--docker",
+            "--packages",
+            "one",
+            "--packages",
+            "two",
+            "--container-platform",
+            "linux/amd64",
+        ],
     )
 
     assert context.params["docker"] is True
     assert context.params["packages"] == ("one", "two")
+    assert context.params["container_platform"] == (cli.ContainerPlatform.LINUX_AMD64,)
     assert context.params["n_workers"] == 1
-    assert context.params["recipe_folder"] == "recipes/"
+    assert context.params["recipe_folder"] == Path("recipes")
     assert context.params["config"] == Path("config.yml")
 
 
@@ -174,7 +195,7 @@ def test_lint_logs_exceptions_without_pdb(monkeypatch, caplog, tmp_path):
     )
 
     with caplog.at_level(logging.ERROR), pytest.raises(RuntimeError, match="bad"):
-        cli.lint(str(tmp_path), tmp_path)
+        cli.lint(tmp_path, tmp_path)
 
     assert "Lint command failed" in caplog.text
 

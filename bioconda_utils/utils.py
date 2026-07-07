@@ -68,7 +68,7 @@ from bioconda_utils._types import (
     ContainerPlatform,
     OCIImageConfig,
     OsLabel,
-    PACKAGE_SUBDIRS,
+    ALL_PACKAGE_SUBDIRS,
     PackageSubdir,
     Subdir,
     container_platform_to_package_subdir,
@@ -1429,7 +1429,7 @@ class RepoData:
     columns = _load_columns + ["channel", "subdir", "platform"]
     #: Conda repodata subdirs loaded by default. The dataframe ``platform``
     #: column stores these subdir strings directly for historical reasons.
-    platforms: list[Subdir] = [*PACKAGE_SUBDIRS, "noarch"]
+    platforms: list[Subdir] = [*ALL_PACKAGE_SUBDIRS, "noarch"]
     # config object
     config = None
 

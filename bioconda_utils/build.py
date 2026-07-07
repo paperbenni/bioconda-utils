@@ -30,7 +30,7 @@ from . import graph
 from . import recipe as _recipe
 from ._types import (
     ContainerPlatform,
-    PACKAGE_SUBDIRS,
+    ALL_PACKAGE_SUBDIRS,
     PackageSubdir,
     PkgBuildRef,
     QuayUploadTarget,
@@ -449,7 +449,7 @@ def should_skip_platform(
     """
     recipe_obj = _recipe.Recipe.from_file(recipe_folder, recipe)
     primary_platforms = {PackageSubdir.LINUX_64, PackageSubdir.OSX_64}
-    additional_platforms = set(PACKAGE_SUBDIRS) - primary_platforms
+    additional_platforms = set(ALL_PACKAGE_SUBDIRS) - primary_platforms
     return (
         platform in additional_platforms
         and platform not in recipe_obj.additional_platforms

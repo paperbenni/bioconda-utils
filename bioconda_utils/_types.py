@@ -27,7 +27,7 @@ class ContainerPlatform(StrEnum):
     LINUX_RISCV64 = "linux/riscv64"
 
 
-CONTAINER_PLATFORMS: tuple[ContainerPlatform, ...] = tuple(ContainerPlatform)
+ALL_CONTAINER_PLATFORMS: tuple[ContainerPlatform, ...] = tuple(ContainerPlatform)
 
 
 #: Conda package subdir notation for *built* per-architecture packages. This
@@ -44,7 +44,7 @@ class PackageSubdir(StrEnum):
     OSX_ARM64 = "osx-arm64"
 
 
-PACKAGE_SUBDIRS: tuple[PackageSubdir, ...] = tuple(PackageSubdir)
+ALL_PACKAGE_SUBDIRS: tuple[PackageSubdir, ...] = tuple(PackageSubdir)
 #: Conda repodata subdir notation, including ``noarch``.
 Subdir: TypeAlias = PackageSubdir | Literal["noarch"]
 #: A two-part OS label -- the form conda-build's ``config.platform`` and its

@@ -62,7 +62,7 @@ from conda import exports as conda_exports
 from . import utils
 from ._types import (
     ContainerPlatform,
-    PACKAGE_SUBDIRS,
+    ALL_PACKAGE_SUBDIRS,
     PkgBuildRef,
     local_mulled_image_ref,
 )
@@ -72,7 +72,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 LOCAL_CHANNEL_SUBDIRS = tuple(
-    subdir for subdir in PACKAGE_SUBDIRS if subdir.startswith("linux-")
+    subdir for subdir in ALL_PACKAGE_SUBDIRS if subdir.startswith("linux-")
 ) + ("noarch",)
 LOCAL_CHANNEL_MKDIRS = "\n  ".join(
     f'mkdir -p "${{local_channel}}"/{subdir}' for subdir in LOCAL_CHANNEL_SUBDIRS

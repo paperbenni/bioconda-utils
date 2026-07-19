@@ -189,9 +189,7 @@ class GitHandlerBase:
                     except KeyError:
                         pass
         # now try if any remote matches the url
-        remotes = [
-            r for r in self.repo.remotes if any(filter(lambda x: desc in x, r.urls))
-        ]
+        remotes = [r for r in self.repo.remotes if any(desc in url for url in r.urls)]
 
         if not remotes:
             raise KeyError(f"No remote matching '{desc}' found")

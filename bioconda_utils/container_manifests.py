@@ -9,23 +9,24 @@ import os
 import shutil
 import tempfile
 import uuid
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from . import utils
-from .utils import (
-    skopeo_env,
-    skopeo_auth_args,
-    skopeo_inspect_digest,
-    parse_oci_config_platform,
-)
 from ._types import (
     ALL_CONTAINER_PLATFORMS,
     ContainerPlatform,
     docker_platform_staging_suffix,
     normalize_container_platform,
+)
+from .utils import (
+    parse_oci_config_platform,
+    skopeo_auth_args,
+    skopeo_env,
+    skopeo_inspect_digest,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ def write_image_record(path: str | Path, record: MulledImageRecord) -> None:
     """
     output = Path(path)
     output.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     file_path = output / f"{timestamp}_{uuid.uuid4().hex}.jsonl"
     with file_path.open("w", encoding="utf-8") as handle:
         json.dump(asdict(record), handle, sort_keys=True)
@@ -260,7 +261,7 @@ def _docker_config_env(
             f"Cannot parse credentials for docker login to {host}: "
             "expected 'user:password' or '$oauthtoken:token'"
         )
-    auth = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+    auth = base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
     source_dir = Path(os.environ.get("DOCKER_CONFIG") or Path.home() / ".docker")
     source_config = source_dir / "config.json"
     config: dict[str, Any] = {}

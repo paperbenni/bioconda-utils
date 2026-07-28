@@ -3,19 +3,19 @@ Mulled Tests
 """
 
 import json
-import subprocess as sp
-import tempfile
+import logging
 import os
 import shlex
-import logging
+import subprocess as sp
+import tempfile
 from collections.abc import Sequence
-
-from . import utils
-from ._types import ContainerPlatform, MULLED_LOCAL_NAMESPACE, PkgBuildRef
 
 from conda_build.metadata import MetaData
 from conda_index.index import update_index
 from conda_package_streaming.package_streaming import stream_conda_info
+
+from . import utils
+from ._types import MULLED_LOCAL_NAMESPACE, ContainerPlatform, PkgBuildRef
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +138,7 @@ def _generate_explicit_spec(
             capture_output=True,
             text=True,
             timeout=300,
+            check=False,
         )
         if result.returncode != 0:
             logger.debug("conda create --dry-run failed: %s", result.stderr)
@@ -442,8 +443,7 @@ def build_and_test_mulled_image(
         raise ValueError("CONDA_IMAGE env var already exists!")
     else:
         env["CONDA_IMAGE"] = conda_image
-    with tempfile.TemporaryDirectory() as d:
-        with utils.Progress():
-            p = utils.run(cmd, env=env, cwd=d, redacted_secrets=False, live=live_logs)
+    with tempfile.TemporaryDirectory() as d, utils.Progress():
+        p = utils.run(cmd, env=env, cwd=d, redacted_secrets=False, live=live_logs)
 
     return p

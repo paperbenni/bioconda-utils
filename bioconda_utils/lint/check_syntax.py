@@ -6,7 +6,7 @@ section that is otherwise free-form.
 """
 
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from . import LintCheck, _recipe
 
@@ -83,7 +83,7 @@ class extra_identifiers_not_string(LintCheck):
 
     """
 
-    requires = [extra_identifiers_not_list]
+    requires: ClassVar = [extra_identifiers_not_list]
 
     def check_recipe(self, recipe: _recipe.Recipe) -> None:
         identifiers_sections = recipe.get_all_section_occurrences("extra/identifiers")
@@ -104,7 +104,7 @@ class extra_identifiers_missing_colon(LintCheck):
 
     """
 
-    requires = [extra_identifiers_not_string]
+    requires: ClassVar = [extra_identifiers_not_string]
 
     def check_recipe(self, recipe: _recipe.Recipe) -> None:
         identifiers_sections = recipe.get_all_section_occurrences("extra/identifiers")

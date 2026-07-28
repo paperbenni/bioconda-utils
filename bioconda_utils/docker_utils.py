@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 """
 To ensure conda packages are built in the most compatible manner, we can use
 a docker container. This module supports using a docker container to build
@@ -44,30 +42,30 @@ Other notes:
   Most magic happens here.
 """
 
+import grp
+import logging
 import os
 import os.path
-from shlex import quote
+import pwd
+import re
 import shutil
 import subprocess as sp
 import tempfile
-import pwd
-import grp
-from importlib.resources import files, as_file
-import re
-from packaging.version import Version
+from importlib.resources import as_file, files
+from pathlib import Path
+from shlex import quote
 from typing import Protocol
 
 from conda import exports as conda_exports
+from packaging.version import Version
 
 from . import utils
 from ._types import (
-    ContainerPlatform,
     ALL_PACKAGE_SUBDIRS,
+    ContainerPlatform,
     PkgBuildRef,
     local_mulled_image_ref,
 )
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +134,7 @@ conda index {self.container_staging}
 # Ensure permissions are correct on the host.
 HOST_USER={self.user_info[uid]}
 chown $HOST_USER:$HOST_USER {self.container_staging}/{arch}/*
-"""  # noqa: E501
+"""
 
 # ----------------------------------------------------------------------------
 # DOCKERFILE_TEMPLATE
@@ -275,12 +273,12 @@ class RecipeBuilder:
         # find and store user info
         uid = os.getuid()
         usr = pwd.getpwuid(uid)
-        self.user_info = dict(
-            uid=uid,
-            gid=usr.pw_gid,
-            groupname=grp.getgrgid(usr.pw_gid).gr_name,
-            username=usr.pw_name,
-        )
+        self.user_info = {
+            "uid": uid,
+            "gid": usr.pw_gid,
+            "groupname": grp.getgrgid(usr.pw_gid).gr_name,
+            "username": usr.pw_name,
+        }
 
         self.container_recipe = container_recipe
         self.container_staging = container_staging
@@ -354,14 +352,16 @@ class RecipeBuilder:
         )
         with open(os.path.join(build_dir, "requirements.txt"), "w") as fout:
             if self.requirements:
-                fout.write(open(self.requirements).read())
+                fout.write(Path(self.requirements).read_text())
             else:
                 # pkg_resources (deprecated) is replaced with importlib.resources
-                with as_file(
-                    files("bioconda_utils") / "bioconda_utils-requirements.txt"
-                ) as req_path:
-                    with open(req_path, encoding="utf-8") as fh:
-                        fout.write(fh.read())
+                with (
+                    as_file(
+                        files("bioconda_utils") / "bioconda_utils-requirements.txt"
+                    ) as req_path,
+                    open(req_path, encoding="utf-8") as fh,
+                ):
+                    fout.write(fh.read())
 
         proxies = "\n".join(f"ENV {k} {v}" for k, v in self._find_proxy_settings())
 
@@ -372,7 +372,7 @@ class RecipeBuilder:
                 )
             )
 
-        logger.debug("Dockerfile:\n" + open(fout.name).read())
+        logger.debug("Dockerfile:\n%s", Path(fout.name).read_text())
 
         # Check if the installed version of docker supports the --network flag
         # (requires version >= 1.13.0)
@@ -417,12 +417,12 @@ class RecipeBuilder:
         try:
             with utils.Progress():
                 p = utils.run(cmd, redacted_secrets=False)
-        except sp.CalledProcessError as e:
+        except sp.CalledProcessError:
             logger.error(
                 "DOCKER FAILED: Error building docker container %s. ",
                 self.docker_temp_image,
             )
-            raise e
+            raise
 
         logger.info("DOCKER: Built docker image tag=%s", self.docker_temp_image)
         if self.image_build_dir is None:
@@ -464,7 +464,7 @@ class RecipeBuilder:
         # Attach the build args to self so that it can be filled in by the
         # template.
         if not isinstance(build_args, str):
-            raise ValueError("build_args must be str")
+            raise TypeError("build_args must be str")
         build_args_list = [build_args]
         for i, config_file in enumerate(utils.get_conda_build_config_files()):
             dst_file = self._get_config_path(self.container_staging, i, config_file)
@@ -484,7 +484,9 @@ class RecipeBuilder:
         with open(os.path.join(build_dir, "build_script.bash"), "w") as fout:
             fout.write(script)
         build_script = fout.name
-        logger.debug("DOCKER: Container build script: \n%s", open(fout.name).read())
+        logger.debug(
+            "DOCKER: Container build script: \n%s", Path(fout.name).read_text()
+        )
 
         # Build the args for env vars. Note can also write these to tempfile
         # and use --env-file arg, but using -e seems clearer in debug output.

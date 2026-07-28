@@ -1,25 +1,25 @@
-import os
-import time
-from typing import Any
-from collections.abc import Iterator
-import subprocess as sp
 import logging
+import os
+import subprocess as sp
+import time
+from collections.abc import Iterator
 from hashlib import sha256
 from pathlib import Path
+from typing import Any
 
+import conda.base.constants
+import conda.exports
+import networkx as nx
+import pandas as pd
 import ruamel.yaml
 import ruamel.yaml.reader
 from ruamel.yaml import YAML, CommentedMap
 from ruamel.yaml.scalarstring import LiteralScalarString
-import conda.exports
-import conda.base.constants
-import pandas as pd
-import networkx as nx
+
+from bioconda_utils import graph, utils
+from bioconda_utils.recipe import Recipe
 
 from .githandler import BiocondaRepo, GitRange
-
-from bioconda_utils.recipe import Recipe
-from bioconda_utils import graph, utils
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class BuildFailureRecord:
         if self.exists():
             load(self.path)
         else:
-            self.inner = dict()
+            self.inner = {}
 
     def exists(self) -> bool:
         return os.path.exists(self.path)
@@ -281,10 +281,9 @@ def collect_build_failure_dataframe(
             components = recipe.split(os.sep)
             is_version_subdir = len(components) == 3
 
-            if is_version_subdir:
-                # skip if latest recipe does not have a build failure
-                if not has_build_failure(os.path.dirname(recipe)):
-                    continue
+            if is_version_subdir and not has_build_failure(os.path.dirname(recipe)):
+                # Skip if the latest recipe does not have a build failure.
+                continue
 
             package = components[-1] if not is_version_subdir else components[-2]
             meta = utils.load_meta_fast(recipe)[0]

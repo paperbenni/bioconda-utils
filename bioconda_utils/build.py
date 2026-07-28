@@ -4,33 +4,28 @@ Package Builder
 
 from __future__ import annotations
 
-import subprocess as sp
-from collections.abc import Sequence
-from collections import defaultdict
 import itertools
 import logging
 import os
+import subprocess as sp
+from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
-
 from typing import Any, NamedTuple
-from bioconda_utils.skiplist import Skiplist
-from bioconda_utils.build_failure import BuildFailureRecord
 
+import networkx as nx
 from conda.exports import UnsatisfiableError
 from conda_build.exceptions import DependencyNeedsBuildingError
 from conda_build.metadata import MetaData
-import networkx as nx
 
-from . import utils
-from . import docker_utils
-from . import pkg_test
-from . import upload
-from . import lint
-from . import graph
+from bioconda_utils.build_failure import BuildFailureRecord
+from bioconda_utils.skiplist import Skiplist
+
+from . import docker_utils, graph, lint, pkg_test, upload, utils
 from . import recipe as _recipe
 from ._types import (
-    ContainerPlatform,
     ALL_PACKAGE_SUBDIRS,
+    ContainerPlatform,
     PackageSubdir,
     PkgBuildRef,
     QuayUploadTarget,
@@ -226,11 +221,9 @@ def build(
         logger.info(
             "BUILD SUCCESS %s", " ".join(os.path.basename(p) for p in pkg_paths)
         )
-        if record_build_failure:
-            # Success, hence the record is obsolete. Remove it.
-            if build_failure_record_existed_before_build:
-                # record is already removed (see above), but change has to be committed
-                build_failure_record.commit_and_push_changes()
+        if record_build_failure and build_failure_record_existed_before_build:
+            # The obsolete record is already removed; commit that removal.
+            build_failure_record.commit_and_push_changes()
 
     except (
         docker_utils.DockerCalledProcessError,
@@ -243,7 +236,7 @@ def build(
             assert dag is not None
             store_build_failure_record(recipe, exc.output, meta, dag, skiplist_leaves)
         if raise_error:
-            raise exc
+            raise
         return BuildResult(False, None)
     finally:
         report_resources(f"Finished build for {recipe}", docker_builder is not None)
@@ -275,7 +268,7 @@ def build(
                                 conda_image=mulled_conda_image,
                                 live_logs=live_logs,
                             )
-                        except Exception as exc:
+                        except (OSError, RuntimeError, ValueError) as exc:
                             logger.info(
                                 "Pre-solved test failed (%s), falling back to "
                                 "mulled-build",
@@ -393,7 +386,7 @@ def get_worker_subdag(
         if subdag_depth is not None:
             working_dag = nx.DiGraph(dag)
             # Only build the current "root" nodes after removing
-            for i in range(0, subdag_depth + 1):
+            for i in range(subdag_depth + 1):
                 print(f"{len(root_nodes)} recipes at depth {i}")
                 if len(root_nodes) == 0:
                     break

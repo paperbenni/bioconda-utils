@@ -42,49 +42,42 @@ Overview:
 
 from __future__ import annotations
 
-
 import abc
 import asyncio
 import logging
 import os
 import pickle
-from pathlib import Path
 import random
-
-from collections import defaultdict, Counter
-from urllib.parse import urlparse
-from typing import Any, cast
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
+from typing import Any, cast
+from urllib.parse import urlparse
 
 import aiofiles
-from aiohttp import ClientResponseError
-
+import conda_build.config
 import networkx as nx
+from aiohttp import ClientResponseError
+from conda.exports import MatchSpec, VersionOrder
+from packaging.version import InvalidVersion, Version
+from packaging.version import parse as _pep440_parse
+
 from bioconda_utils.skiplist import Skiplist
 
-import conda_build.config
-from conda.exports import MatchSpec, VersionOrder
-
-from packaging.version import parse as _pep440_parse, InvalidVersion, Version
-
-from . import __version__
-from . import utils
-from . import update_pinnings
-from . import graph
-from .utils import ensure_list, RepoData
-from .recipe import Recipe
-from .recipe import load_parallel_iter as recipes_load_parallel_iter
+from . import __version__, graph, update_pinnings, utils
 from .aiopipe import (
     AsyncFilter,
     AsyncPipeline,
     AsyncRequests,
-    EndProcessingItem,
     EndProcessing,
+    EndProcessingItem,
 )
-
 from .githandler import GitHandler
 from .githubhandler import GitHubHandler
 from .hosters import Hoster
+from .recipe import Recipe
+from .recipe import load_parallel_iter as recipes_load_parallel_iter
+from .utils import RepoData, ensure_list
 
 
 def _parse_or_legacy(s: str) -> tuple[Version | str, bool]:
@@ -258,8 +251,9 @@ class Scanner(AsyncPipeline[Recipe]):
         logger.info("SUM: %i", sum(self.stats.values()))
         if self.status_fn:
             with open(self.status_fn, "w") as out:
-                for rname, result in self.status:
-                    out.write(f"{rname}\t{result.name}\n")
+                out.writelines(
+                    f"{rname}\t{result.name}\n" for rname, result in self.status
+                )
         return res
 
     async def queue_items(
@@ -670,12 +664,13 @@ class UpdateVersion(Filter, AutoBumpConfigMixin):
 
         # Update the version number itself. This will also usually update
         # `url:`s expressed with `{{version}}` tags.
-        if not recipe.replace(recipe.version, latest, within=["package"]):
-            # allow changes between dash/dot/underscore
-            if recipe.replace(
-                recipe.version, latest, within=["package"], with_fuzz=True
-            ):
-                logger.warning("Recipe %s: replaced version with fuzz", recipe)
+        if not recipe.replace(
+            recipe.version, latest, within=["package"]
+        ) and recipe.replace(
+            recipe.version, latest, within=["package"], with_fuzz=True
+        ):
+            # Allow changes between dash/dot/underscore.
+            logger.warning("Recipe %s: replaced version with fuzz", recipe)
 
         recipe.reset_buildnumber()
         recipe.render()

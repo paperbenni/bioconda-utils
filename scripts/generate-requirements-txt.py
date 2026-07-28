@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 from pathlib import Path
+from typing import cast
 
 try:
     import tomllib
@@ -75,6 +76,7 @@ def format_dep(pkg, ver):
         raise ValueError(f"Invalid dependency name: {pkg!r}")
 
     if isinstance(ver, dict):
+        ver = cast(dict[str, object], ver)
         unknown_keys = set(ver) - SUPPORTED_DICT_KEYS
         if unknown_keys:
             keys = ", ".join(sorted(unknown_keys))
@@ -94,7 +96,7 @@ def format_dep(pkg, ver):
         return f"{pkg}={v}" if v != "*" else pkg
 
     if not isinstance(ver, str):
-        raise ValueError(f"Unsupported dependency specification for {pkg!r}: {ver!r}")
+        raise TypeError(f"Unsupported dependency specification for {pkg!r}: {ver!r}")
 
     ver = str(ver)
     if ver == "*":

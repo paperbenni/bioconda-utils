@@ -5,12 +5,11 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from typer.core import TyperArgument
 from typer.main import get_command
 from typer.testing import CliRunner
-from typer.core import TyperArgument
 
 from bioconda_utils import cli
-
 
 runner = CliRunner()
 
@@ -102,7 +101,7 @@ def test_invalid_git_ranges_are_rejected(spec):
 
 
 def test_cli_rejects_two_dot_git_range(monkeypatch):
-    monkeypatch.setattr(cli._lint, "get_checks", lambda: [])
+    monkeypatch.setattr(cli._lint, "get_checks", list)
 
     result = runner.invoke(
         cli.app, ["lint", "--list-checks", "--git-range", "main..HEAD"]

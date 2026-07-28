@@ -93,25 +93,24 @@ Module Autodocs
 
 from __future__ import annotations
 
-
 import abc
+import importlib
+import inspect
+import logging
 import os
-from pathlib import Path
 import pkgutil
 import re
-import logging
-import inspect
-import importlib
 from collections import defaultdict
 from enum import IntEnum
-from typing import Any, NamedTuple, cast
+from pathlib import Path
+from typing import Any, ClassVar, NamedTuple, cast
 
-from bioconda_utils.skiplist import Skiplist
 import networkx as nx
 
-from .. import utils
-from .. import recipe as _recipe
+from bioconda_utils.skiplist import Skiplist
 
+from .. import recipe as _recipe
+from .. import utils
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +191,7 @@ def get_checks() -> list[type[LintCheck]]:
 class LintCheck(metaclass=LintCheckMeta):
     """Base class for lint checks"""
 
-    registry: list[type[LintCheck]] = []
+    registry: ClassVar[list[type[LintCheck]]] = []
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -203,7 +202,7 @@ class LintCheck(metaclass=LintCheckMeta):
     severity: Severity = ERROR
 
     #: Checks that must have passed for this check to be executed.
-    requires: list[LintCheck] = []
+    requires: ClassVar[list[LintCheck]] = []
 
     def __init__(self, _linter: Linter) -> None:
         #: Messages collected running tests
@@ -251,13 +250,13 @@ class LintCheck(metaclass=LintCheckMeta):
                     self.check_source(cast(dict[str, Any], src), f"source/{num}")
 
         # Run depends checks, per outputs: package if necessary
-        outputs = recipe.get("outputs", dict())
+        outputs = recipe.get("outputs", {})
         deps = recipe.get_deps_dict()
         if outputs:
             for i in range(len(outputs)):
                 output_location = f"outputs/{i}/"
                 # filter down to dependencies for this outputs: package
-                output_deps = dict()
+                output_deps = {}
                 for dep in deps:
                     if any(output_location in d for d in deps[dep]):
                         output_deps[dep] = deps[dep]
@@ -623,7 +622,7 @@ class Linter:
         except _recipe.RecipeError as exc:
             recipe = _recipe.Recipe(recipe_name, self.recipe_folder)
             check_cls = recipe_error_to_lint_check.get(exc.__class__, linter_failure)
-            return [check_cls.make_message(recipe=recipe, line=getattr(exc, "line"))]
+            return [check_cls.make_message(recipe=recipe, line=exc.line)]
 
         # collect checks to skip
         checks_to_skip = set(self.skip[os.fspath(recipe_name)])

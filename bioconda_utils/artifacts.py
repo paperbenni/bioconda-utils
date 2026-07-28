@@ -1,21 +1,23 @@
-from enum import Enum
 import glob
+import json
+import logging
 import os
 import re
+import sys
 import tempfile
 import zipfile
-import logging
-from typing import Literal
 from collections.abc import Iterator
-
-import requests
-import backoff
-import json
+from enum import Enum
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlparse
+
+import backoff
+import requests
 from github.CheckRun import CheckRun
 from github.PullRequest import PullRequest
 from github.Repository import Repository
-from urllib.parse import urlparse
+
 from bioconda_utils import utils
 from bioconda_utils._types import (
     ContainerPlatform,
@@ -23,14 +25,14 @@ from bioconda_utils._types import (
     QuayUploadTarget,
     docker_platform_tag_suffix,
 )
+from bioconda_utils.container_manifests import (
+    resolve_registry_creds,
+    write_image_record,
+)
 from bioconda_utils.upload import (
     anaconda_upload,
     inspect_image_platform,
     upload_mulled_image_source,
-)
-from bioconda_utils.container_manifests import (
-    resolve_registry_creds,
-    write_image_record,
 )
 
 logger = logging.getLogger(__name__)
@@ -334,7 +336,7 @@ def download_artifact(url: str, to_path: Path, artifact_source: ArtifactSource) 
             logger.critical(
                 "GITHUB_TOKEN required to download GitHub Actions artifacts"
             )
-            exit(1)
+            sys.exit(1)
         headers = {"Authorization": f"token {token}"}
     resp = requests.get(url, stream=True, allow_redirects=True, headers=headers)
     resp.raise_for_status()
@@ -424,7 +426,7 @@ def get_circleci_artifact_urls(check_run: CheckRun, platform: str) -> Iterator[s
     token = os.environ.get("CIRCLECI_TOKEN")
     if not token:
         logger.critical("CIRCLECI_TOKEN required to download CircleCI artifacts list.")
-        exit(1)
+        sys.exit(1)
     headers = {"Circle-Token": token}
 
     # Use API v2 because v1.1 does not have a workflow endpoint

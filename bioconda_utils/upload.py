@@ -3,18 +3,14 @@ Deploy Artifacts to Anaconda and Quay
 """
 
 import json
+import logging
 import os
 import subprocess as sp
-import logging
-import requests
+
 import backoff
+import requests
+
 from . import utils
-from .utils import (
-    skopeo_env,
-    skopeo_auth_args,
-    skopeo_inspect_digest,
-    parse_oci_config_platform,
-)
 from ._types import (
     ContainerPlatform,
     PkgBuildRef,
@@ -26,6 +22,12 @@ from .container_manifests import (
     MulledImageRecord,
     platform_ref,
     resolve_registry_creds,
+)
+from .utils import (
+    parse_oci_config_platform,
+    skopeo_auth_args,
+    skopeo_env,
+    skopeo_inspect_digest,
 )
 
 logger = logging.getLogger(__name__)

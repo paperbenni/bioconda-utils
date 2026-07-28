@@ -3,42 +3,38 @@
 # Workaround for spurious numpy warning message
 # ".../importlib/_bootstrap.py:219: RuntimeWarning: numpy.dtype size \
 # changed, may indicate binary incompatibility. Expected 96, got 88"
-import warnings
+import importlib
 import logging
+import os
+import shlex
+import sys
+import warnings
+from collections import Counter, defaultdict
+from functools import partial
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
-import typer
 import click
+import conda
+import conda.base.constants
+import networkx as nx
+import pandas
+import requests
+import typer
+from networkx.drawing.nx_pydot import write_dot
 
-from . import __version__ as VERSION
-from . import utils
 from bioconda_utils import bulk
 from bioconda_utils.artifacts import ArtifactSource, UploadResult, upload_pr_artifacts
-from bioconda_utils.skiplist import Skiplist
 from bioconda_utils.build_failure import (
     BuildFailureRecord,
     collect_build_failure_dataframe,
 )
-import sys
-import os
-from pathlib import Path
-import shlex
-from collections import defaultdict, Counter
-from functools import partial
-import conda
-import conda.base.constants
-import networkx as nx
-from networkx.drawing.nx_pydot import write_dot
-import pandas
-from .build import build_recipes
-from . import docker_utils
-from . import lint as _lint
+from bioconda_utils.skiplist import Skiplist
+
+from . import __version__ as VERSION
 from . import bioconductor_skeleton as _bioconductor_skeleton
-from . import cran_skeleton
-from . import update_pinnings
-from . import graph
-from . import pkg_test
-from .githandler import BiocondaRepo, GitRange, install_gpg_key
+from . import cran_skeleton, docker_utils, graph, pkg_test, update_pinnings, utils
+from . import lint as _lint
 from ._types import (
     ALL_CONTAINER_PLATFORMS,
     ContainerPlatform,
@@ -48,12 +44,14 @@ from ._types import (
     package_subdir_to_container_platform,
     parse_quay_upload_target,
 )
+from .build import build_recipes
 from .container_manifests import (
     DEFAULT_MULLED_RECORDS_DIR,
     load_image_records,
     reconcile_manifests,
     resolve_registry_creds,
 )
+from .githandler import BiocondaRepo, GitRange, install_gpg_key
 
 warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 
@@ -158,9 +156,7 @@ def _handle_pdb_exception(command_name: str, pdb: bool) -> bool:
     """
     logger.exception(f"{command_name} command failed")
     if pdb:
-        import pdb as debugger
-
-        debugger.post_mortem()
+        importlib.import_module("pdb").post_mortem()
         return True
     return False
 
@@ -641,7 +637,7 @@ def build(
         mulled_upload_records=mulled_upload_records,
         use_existing_auth=use_existing_auth,
     )
-    exit(0 if success else 1)
+    sys.exit(0 if success else 1)
 
 
 @app.command("dag")
@@ -757,7 +753,7 @@ def dependent(
     pkgs = []
     for pkg in selected_packages:
         pkgs.extend(dependency_func(d, pkg))
-    print("\n".join(sorted(list(set(pkgs)))))
+    print("\n".join(sorted(set(pkgs))))
 
 
 @app.command("lint")
@@ -804,7 +800,7 @@ def lint(
     try:
         parsed_git_range = _parse_git_range_if_needed(git_range)
         if list_checks:
-            print("\n".join((str(check) for check in _lint.get_checks())))
+            print("\n".join(str(check) for check in _lint.get_checks()))
             sys.exit(0)
         _validate_path_exists(recipe_folder)
         _validate_path_exists(config)
@@ -832,7 +828,7 @@ def lint(
             sys.exit("Errors were found")
     except Exception:
         if _handle_pdb_exception("Lint", pdb):
-            return None
+            return
         raise
 
 
@@ -915,15 +911,17 @@ def duplicates(
         our_channel,
     )
     duplicate = defaultdict(list)
-    for channel in channels:
-        package_specs = set(repodata.get_package_data(check_fields, channel))
+    for candidate_channel in channels:
+        package_specs = set(repodata.get_package_data(check_fields, candidate_channel))
         logger.info(
-            "%s unique packages specs to consider in %s", len(package_specs), channel
+            "%s unique packages specs to consider in %s",
+            len(package_specs),
+            candidate_channel,
         )
         dups = our_package_specs & package_specs
         logger.info("  (of which %s are duplicate)", len(dups))
         for spec in dups:
-            duplicate[spec].append(channel)
+            duplicate[spec].append(candidate_channel)
     print("\t".join(check_fields + ["channels"]))
     for spec, dup_channels in sorted(duplicate.items()):
         if remove:
@@ -994,17 +992,15 @@ def update_pinning(
         variant_keys = frozenset(skip_variants or ())
         if cache:
             utils.RepoData().set_cache(cache)
-        utils.RepoData().df
+        _ = utils.RepoData().df
         build_config = utils.load_conda_build_config()
         skiplist = Skiplist(config_data, recipe_folder)
         from . import recipe
 
         dag = graph.build_from_recipes(
-            (
-                r
-                for r in recipe.load_parallel_iter(recipe_folder, ["*"])
-                if not skiplist.is_skiplisted(r)
-            )
+            r
+            for r in recipe.load_parallel_iter(recipe_folder, ["*"])
+            if not skiplist.is_skiplisted(r)
         )
         dag = graph.filter_recipe_dag(dag, package_patterns, [])
         if no_leaves:
@@ -1060,7 +1056,7 @@ def update_pinning(
             )
     except Exception:
         if _handle_pdb_exception("Update-pinning", pdb):
-            return None
+            return
         raise
 
 
@@ -1180,7 +1176,7 @@ def bioconductor_skeleton(
                     skip_if_in_channels=skip_if_in_channels,
                     needs_x=k in needs_x,
                 )
-            except Exception:
+            except (OSError, RuntimeError, ValueError, requests.RequestException):
                 problems.append(k)
         if len(problems):
             sys.exit(
@@ -1377,9 +1373,7 @@ def autobump(
     try:
         # load and register config
         config_dict = utils.load_config(config)
-        from . import autobump
-        from . import githubhandler
-        from . import hosters
+        from . import autobump, githubhandler, hosters
 
         if no_follow_graph:
             recipe_source = autobump.RecipeSource(
@@ -1483,7 +1477,7 @@ def autobump(
             token = os.environ.get("GITHUB_TOKEN")
             if not token and (not dry_run):
                 logger.critical("GITHUB_TOKEN required to create PRs")
-                exit(1)
+                sys.exit(1)
             github_handler = githubhandler.AiohttpGitHubHandler(
                 token, dry_run, "bioconda", "bioconda-recipes"
             )
@@ -1501,7 +1495,7 @@ def autobump(
             git_handler.close()
     except Exception:
         if _handle_pdb_exception("Autobump", pdb):
-            return None
+            return
         raise
 
 
@@ -1600,7 +1594,7 @@ def handle_merged_pr(
         )
     else:
         success = res != UploadResult.FAILURE
-    exit(0 if success else 1)
+    sys.exit(0 if success else 1)
 
 
 @app.command("create-mulled-manifests")
@@ -1759,7 +1753,7 @@ def list_build_failures(
         fmt_writer = pandas.DataFrame.to_string
     else:
         logger.error("Invalid output format, must be txt or markdown.")
-        exit(1)
+        sys.exit(1)
     fmt_writer(df, sys.stdout, index=False)
 
 

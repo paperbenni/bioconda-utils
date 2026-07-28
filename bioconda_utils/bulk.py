@@ -1,4 +1,5 @@
 import logging
+import sys
 
 from bioconda_utils import utils
 
@@ -13,7 +14,7 @@ def check_branch() -> None:
         logger.error(
             "bulk-trigger-ci has to be executed on a checkout of the bulk branch"
         )
-        exit(1)
+        sys.exit(1)
 
 
 def commit(message: str | None = None) -> None:

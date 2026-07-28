@@ -1,8 +1,6 @@
 import pytest
 
-from bioconda_utils import bioconductor_skeleton
-from bioconda_utils import cran_skeleton
-from bioconda_utils import utils
+from bioconda_utils import bioconductor_skeleton, cran_skeleton, utils
 from bioconda_utils._types import Config
 
 config = {"channels": ["conda-forge", "bioconda"]}
@@ -152,7 +150,7 @@ def test_pkg_version():
     assert b.bioarchive_url is None
     assert b.cargoport_url == (
         "https://depot.galaxyproject.org/software/bioconductor-deseq2/bioconductor-deseq2_1.14.1_src_all.tar.gz"
-    )  # noqa: E501
+    )
 
     # bioc version specified, but not package version
     b = bioconductor_skeleton.BioCProjectPage("edgeR", bioc_version="3.5")
@@ -164,7 +162,7 @@ def test_pkg_version():
     assert b.bioarchive_url is None
     assert b.cargoport_url == (
         "https://depot.galaxyproject.org/software/bioconductor-edger/bioconductor-edger_3.18.1_src_all.tar.gz"
-    )  # noqa: E501
+    )
 
 
 def test_bioarchive_exists_but_not_bioconductor():

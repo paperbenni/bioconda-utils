@@ -6,16 +6,14 @@ import enum
 import logging
 import re
 import string
-
-from .utils import RepoData
+from collections.abc import Set as AbstractSet
 
 # FIXME: trim_build_only_deps is not exported via conda_build.api!
 #        Re-implement it here or ask upstream to export that functionality.
-from conda_build.metadata import trim_build_only_deps
+from conda_build.metadata import MetaData, trim_build_only_deps
 
-from collections.abc import Set as AbstractSet
 from .recipe import Recipe, RecipeError
-from conda_build.metadata import MetaData
+from .utils import RepoData
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -84,7 +82,7 @@ _legacy_build_string_prefixes = re.compile(
         (?P<mro_base> mro  [0-9]{3,9})
     )*
     """,
-    re.X,
+    re.VERBOSE,
 )
 
 
@@ -163,29 +161,26 @@ def _have_partially_matching_build_id(meta: MetaData) -> bool:
         trimmed_current_build_id = current_build_id
         for prefix_key, prefix in matches.groupdict().items():
             current_prefix = current_prefixes[prefix_key]
-            if prefix != current_prefix:
-                if prefix and current_prefix:
-                    # noarch:python is handled in have_noarch_python_build_number
-                    # but we might have noarch:generic recipes that use python.
-                    # It probably doesn't matter which python is chosen then, so
-                    # we also trim the "py*" prefix in that case here.
-                    if not (is_noarch and prefix_key == "python"):
-                        return False
+            if (
+                prefix != current_prefix
+                and prefix
+                and current_prefix
+                and not (is_noarch and prefix_key == "python")
+            ):
+                # noarch:python is handled in have_noarch_python_build_number
+                # but we might have noarch:generic recipes that use python.
+                # It probably doesn't matter which python is chosen then, so
+                # we also trim the "py*" prefix in that case here.
+                return False
             if prefix:
                 trimmed_build_id = trimmed_build_id.replace(prefix, "")
             if current_prefix:
                 trimmed_current_build_id = trimmed_current_build_id.replace(
                     current_prefix, ""
                 )
-        if trimmed_build_id.startswith("_"):
-            # If we trimmed everything but the number, no '_' is inserted.
-            trimmed_build_id = trimmed_build_id[1:]
-        if trimmed_current_build_id.startswith("_"):
-            # If we trimmed everything but the number, no '_' is inserted.
-            trimmed_current_build_id = trimmed_current_build_id[1:]
-        if trimmed_build_id == trimmed_current_build_id:
-            return True
-        return False
+        trimmed_build_id = trimmed_build_id.removeprefix("_")
+        trimmed_current_build_id = trimmed_current_build_id.removeprefix("_")
+        return trimmed_build_id == trimmed_current_build_id
 
     for build_id in res:
         if is_matching_trimmed_build_id(build_id, current_build_id):

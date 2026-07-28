@@ -512,7 +512,6 @@ def test_publish_manifest_injects_docker_config_when_creds_provided(monkeypatch)
         captured["live"] = _kwargs.get("live")
         docker_config = _kwargs["env"]["DOCKER_CONFIG"]
         config_paths.append(Path(docker_config))
-        return None
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
@@ -567,7 +566,6 @@ def test_publish_manifest_handles_oauth_token_format(monkeypatch):
     def fake_run(command, **_kwargs):
         docker_config = Path(_kwargs["env"]["DOCKER_CONFIG"])
         captured["config"] = json.loads((docker_config / "config.json").read_text())
-        return None
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
@@ -607,7 +605,6 @@ def test_publish_manifest_without_creds_omits_docker_config(monkeypatch):
     def fake_run(command, **_kwargs):
         captured["env"] = _kwargs.get("env")
         captured["redacted_secrets"] = _kwargs.get("redacted_secrets")
-        return None
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
@@ -645,7 +642,6 @@ def test_publish_manifest_preserves_user_docker_config(monkeypatch, tmp_path):
         captured["config"] = json.loads(
             (Path(_kwargs["env"]["DOCKER_CONFIG"]) / "config.json").read_text()
         )
-        return None
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
@@ -695,7 +691,6 @@ def test_publish_manifest_overrides_existing_auth_for_target_host(
         captured["config"] = json.loads(
             (Path(_kwargs["env"]["DOCKER_CONFIG"]) / "config.json").read_text()
         )
-        return None
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
@@ -724,7 +719,6 @@ def test_publish_manifest_handles_missing_user_docker_config(monkeypatch, tmp_pa
         captured["config"] = json.loads(
             (Path(_kwargs["env"]["DOCKER_CONFIG"]) / "config.json").read_text()
         )
-        return None
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
@@ -760,7 +754,6 @@ def test_publish_manifest_warns_and_proceeds_on_malformed_user_config(
         captured["config"] = json.loads(
             (Path(_kwargs["env"]["DOCKER_CONFIG"]) / "config.json").read_text()
         )
-        return None
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
@@ -796,7 +789,6 @@ def test_publish_manifest_ignores_non_object_user_config(monkeypatch, tmp_path, 
         captured["config"] = json.loads(
             (Path(_kwargs["env"]["DOCKER_CONFIG"]) / "config.json").read_text()
         )
-        return None
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(

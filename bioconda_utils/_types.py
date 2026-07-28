@@ -8,8 +8,8 @@ from typing import (
     NamedTuple,
     NewType,
     Protocol,
-    TypedDict,
     TypeAlias,
+    TypedDict,
 )
 
 
@@ -102,7 +102,7 @@ def normalize_container_platform(
     """
     if not isinstance(os_name, str) or not isinstance(architecture, str):
         location = f" for {ref}" if ref else ""
-        raise RuntimeError(f"Image platform{location} has no OS/architecture")
+        raise TypeError(f"Image platform{location} has no OS/architecture")
     platform_value = f"{os_name}/{architecture}"
     try:
         return ContainerPlatform(platform_value)

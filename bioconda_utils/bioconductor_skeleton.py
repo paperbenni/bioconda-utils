@@ -11,7 +11,8 @@ import shutil
 import tarfile
 import tempfile
 from collections import OrderedDict
-from datetime import date
+from datetime import UTC, datetime
+from pathlib import Path
 from textwrap import dedent
 from typing import Any
 
@@ -398,7 +399,7 @@ def fetchPackages(bioc_version):
                   ...
         }
     """
-    d = dict()
+    d = {}
     packages_urls = [
         (os.path.join(base_url, bioc_version, "bioc", "VIEWS"), "bioc"),
         (
@@ -427,7 +428,7 @@ def fetchPackages(bioc_version):
         for pkg in req.text.strip().split("\n\n"):
             if not pkg.strip():
                 continue
-            pkgDict = dict()
+            pkgDict = {}
             lastKey = None
             for line in pkg.split("\n"):
                 if line.startswith(" "):
@@ -655,8 +656,8 @@ class BioCProjectPage:
         if os.path.exists(fn):
             self._cached_tarball = fn
             return fn
-        tmp = tempfile.NamedTemporaryFile(delete=False).name
-        with open(tmp, "wb") as fout:
+        with tempfile.NamedTemporaryFile(delete=False) as fout:
+            tmp = fout.name
             logger.info(f"Downloading {self.tarball_url} to {fn}")
             response = requests.get(self.tarball_url, timeout=30)
             if response.status_code == 200:
@@ -820,7 +821,7 @@ class BioCProjectPage:
 
     @property
     def dependencies(self):
-        """ """
+        """Return the package dependencies."""
         if self._dependencies:
             return self._dependencies
 
@@ -1080,7 +1081,7 @@ class BioCProjectPage:
             additional_run_deps.append("curl")
             additional_run_deps.append(
                 "bioconductor-data-packages >={}".format(
-                    date.today().strftime("%Y%m%d")
+                    datetime.now(UTC).strftime("%Y%m%d")
                 )
             )
 
@@ -1154,20 +1155,15 @@ class BioCProjectPage:
         if self.license_file_location():
             d["about"]["license_file"] = self.license_file_location()
 
-        if self.packages[self.package].get("SystemRequirements", None):
-            if self.parseSystemRequirements(
-                self.packages[self.package]["SystemRequirements"]
-            ):
-                d["requirements"]["host"].extend(
-                    self.parseSystemRequirements(
-                        self.packages[self.package]["SystemRequirements"]
-                    )
-                )
-                d["requirements"]["run"].extend(
-                    self.parseSystemRequirements(
-                        self.packages[self.package]["SystemRequirements"]
-                    )
-                )
+        system_requirements = self.packages[self.package].get("SystemRequirements")
+        parsed_requirements = (
+            self.parseSystemRequirements(system_requirements)
+            if system_requirements
+            else []
+        )
+        if parsed_requirements:
+            d["requirements"]["host"].extend(parsed_requirements)
+            d["requirements"]["run"].extend(parsed_requirements)
 
         if self.needsX:
             # Anything that causes rgl to get imported needs X around
@@ -1331,7 +1327,7 @@ def updateDataPackages(bioc_data_packages, pkg, urls, md5, tarball):
     }
     """
     jsPath = os.path.join(bioc_data_packages, "dataURLs.json")
-    jsContent = dict()
+    jsContent = {}
     if os.path.exists(jsPath):
         with open(jsPath) as fin:
             jsContent = json.load(fin)
@@ -1490,7 +1486,7 @@ def write_recipe(
             if not existing_bldnos:
                 proj.build_number = 0
             else:
-                proj.build_number = sorted([int(i) for i in existing_bldnos])[-1] + 1
+                proj.build_number = max([int(i) for i in existing_bldnos]) + 1
 
         if "source" in current_meta and "patches" in current_meta["source"]:
             proj.patches = current_meta["source"]["patches"]
@@ -1502,7 +1498,7 @@ def write_recipe(
             )
 
     with open(os.path.join(recipe_dir, "meta.yaml"), "w") as fout:
-        fout.write(open(proj.meta_yaml).read())
+        fout.write(Path(proj.meta_yaml).read_text())
 
     if not proj.is_data_package:
         with open(os.path.join(recipe_dir, "build.sh"), "w") as fout:

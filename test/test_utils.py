@@ -67,7 +67,7 @@ def ensure_env_missing(env_name):
             stdout=sp.PIPE,
             stderr=sp.STDOUT,
             check=True,
-            universal_newlines=True,
+            text=True,
         )
 
         if env_name in proc.stdout:
@@ -76,7 +76,7 @@ def ensure_env_missing(env_name):
                 stdout=sp.PIPE,
                 stderr=sp.STDOUT,
                 check=True,
-                universal_newlines=True,
+                text=True,
             )
 
     _clean()
@@ -230,13 +230,13 @@ def single_upload(request):
     """
     name = "upload-test-" + str(uuid.uuid4()).split("-")[0]
     r = Recipes(
-        """
-        {0}:
+        f"""
+        {name}:
           meta.yaml: |
             package:
-              name: {0}
+              name: {name}
               version: "0.1"
-        """.format(name),
+        """,
         from_string=True,
     )
     r.write_recipes()
@@ -271,7 +271,7 @@ def single_upload(request):
         stdout=sp.PIPE,
         stderr=sp.STDOUT,
         check=True,
-        universal_newlines=True,
+        text=True,
     )
 
 
@@ -282,7 +282,7 @@ def single_upload(request):
     not os.environ.get("ANACONDA_TOKEN"), reason="No ANACONDA_TOKEN found"
 )
 def test_upload(single_upload):
-    name, pkg, recipe = single_upload
+    name, _pkg, _recipe = single_upload
     env_name = "bioconda-utils-test-" + str(uuid.uuid4()).split("-")[0]
     with ensure_env_missing(env_name):
         sp.run(
@@ -298,7 +298,7 @@ def test_upload(single_upload):
             stdout=sp.PIPE,
             stderr=sp.STDOUT,
             check=True,
-            universal_newlines=True,
+            text=True,
         )
 
 
@@ -504,7 +504,7 @@ def test_conda_as_dep(config_fixture, mulled_build_and_test):
     )
     assert build_result
 
-    for k, v in r.recipe_dirs.items():
+    for v in r.recipe_dirs.values():
         for i in utils.built_package_paths(v):
             assert os.path.exists(i)
             ensure_missing(i)
@@ -990,7 +990,7 @@ def test_build_container_no_default_gcc(tmpdir):
     )
     assert build_result.success
 
-    for k, v in r.recipe_dirs.items():
+    for v in r.recipe_dirs.values():
         for i in utils.built_package_paths(v):
             assert os.path.exists(i)
             ensure_missing(i)
@@ -1025,7 +1025,7 @@ def test_bioconda_pins(caplog, config_fixture):
     )
     assert build_result
 
-    for k, v in r.recipe_dirs.items():
+    for v in r.recipe_dirs.values():
         for i in utils.built_package_paths(v):
             assert os.path.exists(i)
             ensure_missing(i)
@@ -1152,8 +1152,8 @@ def test_variants():
 
     # Write a temporary conda_build_config.yaml that we'll point the config
     # object to:
-    tmp = tempfile.NamedTemporaryFile(delete=False).name
-    with open(tmp, "w") as fout:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False) as fout:
+        tmp = fout.name
         fout.write(
             dedent("""
                 mypkg:
@@ -1217,7 +1217,7 @@ def test_cb3_outputs(config_fixture):
     )
     assert build_result
 
-    for k, v in r.recipe_dirs.items():
+    for v in r.recipe_dirs.values():
         for i in utils.built_package_paths(v):
             assert os.path.exists(i)
             ensure_missing(i)
@@ -1253,7 +1253,7 @@ def test_compiler(config_fixture):
     )
     assert build_result
 
-    for k, v in r.recipe_dirs.items():
+    for v in r.recipe_dirs.values():
         for i in utils.built_package_paths(v):
             assert os.path.exists(i)
             ensure_missing(i)
@@ -1329,7 +1329,7 @@ def test_nested_recipes(config_fixture):
 
     assert len(list(utils.get_recipes(Path(r.basedir)))) == 4
 
-    for k, v in r.recipe_dirs.items():
+    for v in r.recipe_dirs.values():
         for i in utils.built_package_paths(v):
             assert os.path.exists(i)
             ensure_missing(i)
@@ -1377,7 +1377,7 @@ def test_conda_build_sysroot(config_fixture):
     )
     assert build_result
 
-    for k, v in r.recipe_dirs.items():
+    for v in r.recipe_dirs.values():
         for i in utils.built_package_paths(v):
             assert os.path.exists(i)
             ensure_missing(i)
@@ -1480,7 +1480,7 @@ def test_pkg_test_conda_package_format(
             f"conda config --set conda_build.pkg_format {pkg_format}\n\\1",
             docker_utils.BUILD_SCRIPT_TEMPLATE,
             count=1,
-            flags=re.M,
+            flags=re.MULTILINE,
         )
         docker_builder = docker_utils.RecipeBuilder(
             use_host_conda_bld=True,

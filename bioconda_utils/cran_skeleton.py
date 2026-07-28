@@ -3,11 +3,11 @@ This module cleans up conda CRAN skeletons to make it compliant with
 conda-forge requirements.
 """
 
+import argparse
+import logging
 import os
 import re
 from itertools import zip_longest
-import argparse
-import logging
 
 from conda_build.api import skeletonize
 

@@ -1,14 +1,12 @@
+import subprocess as sp
 import sys
 from pathlib import Path
 from textwrap import dedent
-import subprocess as sp
 
 import pytest
-
 from helpers import Recipes, ensure_missing
-from bioconda_utils import pkg_test
-from bioconda_utils import utils
-from bioconda_utils import build
+
+from bioconda_utils import build, pkg_test, utils
 
 # TODO:
 # need tests for channel order and extra channels (see

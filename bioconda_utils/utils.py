@@ -5,70 +5,64 @@ This module collects small pieces of code used throughout :py:mod:`bioconda_util
 """
 
 import asyncio
-import aiofiles
 import contextlib
 import datetime
 import fnmatch
 import glob
+import json
 import logging
 import os
 import platform
+import queue
 import re
+import shutil
 import subprocess as sp
 import sys
-import shutil
-import json
-import queue
 import warnings
-import psutil
-
-from threading import Event, Thread
-from pathlib import Path, PurePath
-from collections import Counter, defaultdict, namedtuple, deque
-from collections.abc import Iterable, Iterator
-from itertools import product, chain, zip_longest
+from collections import Counter, defaultdict, deque, namedtuple
+from collections.abc import Collection, Iterable, Iterator, Sequence
 from functools import partial
-from typing import Any, cast
-from collections.abc import Sequence, Collection
+from importlib.resources import as_file, files
+from itertools import chain, product, zip_longest
 from multiprocessing import Pool
 from multiprocessing.pool import ThreadPool
+from pathlib import Path, PurePath
+from threading import Event, Thread
+from typing import Any, ClassVar, cast
 
-import requests
-from yaspin import yaspin, Spinner
-from yaspin.spinners import Spinners
-from urllib3 import Retry
-import platformdirs
-import diskcache
-
-from github import Github
-
-from importlib.resources import files, as_file
-import pandas as pd
-import tqdm as _tqdm
+import aiofiles
 import aiohttp
 import backoff
-import yaml
-import jinja2
-from jinja2 import Environment, PackageLoader
 
 # FIXME(upstream): For conda>=4.7.0 initialize_logging is (erroneously) called
 #                  by conda.core.index.get_index which messes up our logging.
 # => Prevent custom conda logging init before importing anything conda-related.
 import conda.gateways.logging
-
-from conda_build import api
-from conda.exports import subdir as conda_subdir
-
-from jsonschema import validate
-from colorlog import ColoredFormatter
+import diskcache
+import jinja2
+import pandas as pd
+import platformdirs
+import psutil
+import requests
+import tqdm as _tqdm
+import yaml
 from boltons.funcutils import FunctionBuilder
+from colorlog import ColoredFormatter
+from conda.exports import subdir as conda_subdir
+from conda_build import api
+from github import Github
+from jinja2 import Environment, PackageLoader
+from jsonschema import validate
+from urllib3 import Retry
+from yaspin import Spinner, yaspin
+from yaspin.spinners import Spinners
 
 from bioconda_utils._types import (
+    ALL_PACKAGE_SUBDIRS,
     Config,
     ContainerPlatform,
     OCIImageConfig,
     OsLabel,
-    ALL_PACKAGE_SUBDIRS,
     PackageSubdir,
     Subdir,
     container_platform_to_package_subdir,
@@ -165,7 +159,7 @@ def wraps(func, hide_wrapped=False):
         fb.kwonlyargs += fb_wrapper.kwonlyargs
         fb.kwonlydefaults.update(fb_wrapper.kwonlydefaults)
         fb.body = f"return _call({fb.get_invocation_str()})"
-        execdict = dict(_call=wrapper_func, _func=func)
+        execdict = {"_call": wrapper_func, "_func": func}
         fully_wrapped = fb.get_func(execdict)
         if not hide_wrapped:
             fully_wrapped.__wrapped__ = func
@@ -583,11 +577,11 @@ def load_meta_fast(recipe: str, env=None):
 
     try:
         pth = os.path.join(recipe, "meta.yaml")
-        template = jinja_silent_undef.from_string(open(pth, encoding="utf-8").read())
+        template = jinja_silent_undef.from_string(Path(pth).read_text(encoding="utf-8"))
         meta = yaml.safe_load(template.render(env))
         return (meta, recipe)
-    except Exception:
-        raise ValueError(f"Problem inspecting {recipe}")
+    except (OSError, jinja2.TemplateError, yaml.YAMLError) as exc:
+        raise ValueError(f"Problem inspecting {recipe}") from exc
 
 
 def subdir_to_oslabel(subdir: PackageSubdir) -> OsLabel:
@@ -630,7 +624,7 @@ def load_conda_build_config(platform: OsLabel | None = None, trim_skip: bool = T
         assert os.path.exists(cfg), f"error: {cfg} does not exist"
     if platform:
         config.platform = platform
-    setattr(config, "trim_skip", trim_skip)
+    cast(Any, config).trim_skip = trim_skip
     return config
 
 
@@ -1038,15 +1032,16 @@ def check_recipe_skippable(recipe, check_channels):
     if not metas:
         return True
     # If on CI, handle noarch.
-    if os.environ.get("CI", None) == "true":
-        first_meta = metas[0]
-        if first_meta.get_value("build/noarch"):
-            if not subdir.startswith("linux"):
-                logger.info(
-                    "FILTER: only building %s on linux because it defines noarch.",
-                    recipe,
-                )
-                return True
+    if (
+        os.environ.get("CI") == "true"
+        and metas[0].get_value("build/noarch")
+        and not subdir.startswith("linux")
+    ):
+        logger.info(
+            "FILTER: only building %s on linux because it defines noarch.",
+            recipe,
+        )
+        return True
 
     packages = {
         (meta.name(), meta.version(), int(meta.build_number() or 0)) for meta in metas
@@ -1129,10 +1124,9 @@ def _filter_existing_packages(metas, check_channels):
 
 
 def get_package_paths(recipe, check_channels, force=False, finalize=True):
-    if not force:
-        if check_recipe_skippable(recipe, check_channels):
-            # NB: If we skip early here, we don't detect possible divergent builds.
-            return []
+    if not force and check_recipe_skippable(recipe, check_channels):
+        # NB: If we skip early here, we don't detect possible divergent builds.
+        return []
     if not finalize:
         logger.debug("Using non-finalized render for %s (fast resolve)", recipe)
     _, metas = _load_platform_metas(recipe, finalize=finalize)
@@ -1167,9 +1161,11 @@ def validate_config(config: dict[str, Any]) -> None:
     """Validate a parsed configuration against the packaged schema."""
     # Load packaged schema without pkg_resources (deprecated)
     # files('bioconda_utils') returns a Traversable to the package contents
-    with as_file(files("bioconda_utils") / "config.schema.yaml") as schema_path:
-        with open(schema_path, encoding="utf-8") as fh:
-            schema = yaml.safe_load(fh)
+    with (
+        as_file(files("bioconda_utils") / "config.schema.yaml") as schema_path,
+        open(schema_path, encoding="utf-8") as fh,
+    ):
+        schema = yaml.safe_load(fh)
 
     validate(config, schema)
 
@@ -1228,7 +1224,7 @@ class Progress:
         while not self.stop.wait(60):
             print(".", end="")
             sys.stdout.flush()
-        print("")
+        print()
 
     def __enter__(self):
         self.thread.start()
@@ -1339,9 +1335,9 @@ class AsyncRequests:
                 subdir = url.split("/")[-2]
                 d = {
                     "info": {"subdir": subdir},
-                    "packages": dict(),
-                    "packages.conda": dict(),
-                    "removed": list(),
+                    "packages": {},
+                    "packages.conda": {},
+                    "removed": [],
                     "repodata_version": 1,
                 }
                 result.append(json.dumps(d).encode("UTF-8"))
@@ -1430,13 +1426,13 @@ class RepoData:
     REPODATA_DEFAULTS_URL = "https://repo.anaconda.com/pkgs/main/{subdir}/repodata.json"
     LOCAL_REPODATA = "{channel}/{subdir}/repodata.json"
 
-    _load_columns = ["build", "build_number", "name", "version", "depends"]
+    _load_columns: ClassVar = ["build", "build_number", "name", "version", "depends"]
 
     #: Columns available in internal dataframe
     columns = _load_columns + ["channel", "subdir", "platform"]
     #: Conda repodata subdirs loaded by default. The dataframe ``platform``
     #: column stores these subdir strings directly for historical reasons.
-    platforms: list[Subdir] = [*ALL_PACKAGE_SUBDIRS, "noarch"]
+    platforms: ClassVar[list[Subdir]] = [*ALL_PACKAGE_SUBDIRS, "noarch"]
     # config object
     config = None
 
@@ -1482,13 +1478,13 @@ class RepoData:
         change the structure in which the data is held.
         """
         if self._df_ts is not None:
-            seconds = (datetime.datetime.now() - self._df_ts).seconds
+            seconds = (datetime.datetime.now(datetime.UTC) - self._df_ts).seconds
         else:
             seconds = 0
 
         if self._df is None or seconds > self.cache_timeout:
             self._df = self._load_channel_dataframe_cached()
-            self._df_ts = datetime.datetime.now()
+            self._df_ts = datetime.datetime.now(datetime.UTC)
         return self._df
 
     def _make_repodata_url(self, channel, subdir: Subdir):
@@ -1507,8 +1503,10 @@ class RepoData:
 
     def _load_channel_dataframe_cached(self):
         if self.cache_file is not None and os.path.exists(self.cache_file):
-            ts = datetime.datetime.fromtimestamp(os.path.getmtime(self.cache_file))
-            seconds = (datetime.datetime.now() - ts).seconds
+            ts = datetime.datetime.fromtimestamp(
+                os.path.getmtime(self.cache_file), datetime.UTC
+            )
+            seconds = (datetime.datetime.now(datetime.UTC) - ts).seconds
             if seconds <= self.cache_timeout:
                 logger.info("Loading repodata from cache %s", self.cache_file)
                 return pd.read_pickle(self.cache_file)
@@ -1625,7 +1623,7 @@ class RepoData:
         ):
             if val is None:
                 continue
-            if isinstance(val, list) or isinstance(val, tuple):
+            if isinstance(val, (list, tuple)):
                 df = df[df[col].isin(val)]
             else:
                 df = df[df[col] == val]
@@ -1639,7 +1637,7 @@ class RepoData:
 
 def get_github_client() -> Github:
     """Get a Github client with a robust retry policy."""
-    if "GITHUB_TOKEN" in os.environ.keys():
+    if "GITHUB_TOKEN" in os.environ:
         return Github(
             os.environ["GITHUB_TOKEN"],
             retry=Retry(total=10, status_forcelist=(500, 502, 504), backoff_factor=0.3),

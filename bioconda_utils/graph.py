@@ -3,15 +3,14 @@ Construction and Manipulation of Package/Recipe Graphs
 """
 
 import logging
-from pathlib import Path
-
 from collections import defaultdict
+from collections.abc import Iterable, Iterator, Sequence
 from fnmatch import fnmatch
 from itertools import chain
+from pathlib import Path
 from typing import (
     Any,
 )
-from collections.abc import Iterable, Iterator, Sequence
 
 import networkx as nx
 

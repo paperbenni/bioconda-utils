@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import abc
-from pathlib import Path
 import logging
-
+from collections.abc import AsyncIterator
 from copy import copy
 from enum import Enum
-from typing import Any, TYPE_CHECKING
-from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import backoff
 import cachetools

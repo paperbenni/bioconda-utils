@@ -66,7 +66,11 @@ def install_gpg_key(key) -> str:
       ValueError if importing the key failed
     """
     proc = subprocess.run(
-        ["gpg", "--import"], input=key, stderr=subprocess.PIPE, encoding="ascii"
+        ["gpg", "--import"],
+        input=key,
+        stderr=subprocess.PIPE,
+        encoding="ascii",
+        check=False,
     )
     for line in proc.stderr.splitlines():
         match = re.match(
@@ -584,12 +588,11 @@ class GitHandler(GitHandlerBase):
         #: Branch to restore after running
         try:
             self.prev_active_branch = self.repo.active_branch
-        except Exception:
+        except TypeError:
             # This will fail on CI nodes from forks, but we don't need to switch back and forth between branches there
             logger.warning(
                 "Couldn't get the active branch name, we must be on detached HEAD"
             )
-            pass
 
     def checkout_master(self):
         """Check out master branch (original branch restored by `close()`)"""

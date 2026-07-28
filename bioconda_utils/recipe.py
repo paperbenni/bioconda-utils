@@ -10,40 +10,35 @@ edit the meta.yaml.
 
 from __future__ import annotations
 
-
 import logging
 import os
 import re
 import sys
 import tempfile
 import types
-
 from collections import defaultdict
-from contextlib import redirect_stdout, redirect_stderr
+from collections.abc import Iterator, Sequence
+from contextlib import redirect_stderr, redirect_stdout
 from copy import deepcopy
 from pathlib import Path
+from re import Pattern
 from typing import (
     Any,
+    ClassVar,
+    Literal,
     cast,
     overload,
-    Literal,
 )
-from collections.abc import Iterator, Sequence
-from re import Pattern
-
 
 import conda_build.api
-from conda_build.api import MetaDataTuple
-
 import jinja2
-
+from conda_build.api import MetaDataTuple
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.constructor import DuplicateKeyError
 
 from . import utils
 from .aiopipe import EndProcessingItem
-
 
 yaml = YAML(typ="rt")  # pylint: disable=invalid-name
 
@@ -63,9 +58,9 @@ class RecipeError(EndProcessingItem):
         if message is not None:
             if line is not None:
                 if column is not None:
-                    message += " (at line %i / column %i)" % (line, column)
+                    message += f" (at line {line:d} / column {column:d})"
                 else:
-                    message += " (at line %i)" % line
+                    message += f" (at line {line:d})"
             super().__init__(item, message)
         else:
             super().__init__(item)
@@ -153,7 +148,7 @@ class Recipe:
     """
 
     #: Variables to pass to Jinja when rendering recipe
-    JINJA_VARS = {
+    JINJA_VARS: ClassVar = {
         "cran_mirror": "https://cloud.r-project.org",
         "compiler": lambda x: f"compiler_{x}",
         "stdlib": lambda x: f"stdlib_{x}",
@@ -249,7 +244,8 @@ class Recipe:
             try:
                 path = Path(self.dir, script)
                 content = path.read_text()
-            except Exception:
+            except OSError:
+                logger.debug("Unable to read build script %s", script, exc_info=True)
                 continue
             self.build_scripts[script] = content
 
@@ -295,19 +291,19 @@ class Recipe:
         except Exception as exc:
             if return_exceptions:
                 return exc
-            raise exc
+            raise
         try:
             recipe.read_conda_build_config()
         except Exception as exc:
             if return_exceptions:
                 return exc
-            raise exc
+            raise
         try:
             recipe.read_build_scripts()
         except Exception as exc:
             if return_exceptions:
                 return exc
-            raise exc
+            raise
         recipe.set_original()
         return recipe
 
@@ -341,8 +337,8 @@ class Recipe:
             if selector:
                 variants[selector.strip("[] ")].append(line)
             else:
-                for variant in variants:
-                    variants[variant].append(line)
+                for variant_lines in variants.values():
+                    variant_lines.append(line)
         else:
             # end of file, need to add one to block height
             block_height += 1
@@ -402,8 +398,7 @@ class Recipe:
         return {
             attr: getattr(template.module, attr)
             for attr in dir(template.module)
-            if not attr.startswith("_")
-            and not hasattr(getattr(template.module, attr), "__call__")
+            if not attr.startswith("_") and not callable(getattr(template.module, attr))
         }
 
     def render(self) -> None:
@@ -599,7 +594,7 @@ class Recipe:
           KeyError if no default given and the path does not exist.
         """
         try:
-            nodes, keys = self._walk(path)
+            nodes, _keys = self._walk(path)
         except (KeyError, TypeError):
             if default is not KeyError:
                 return default
@@ -635,17 +630,17 @@ class Recipe:
             missing_as_empty: boolean whether to include missing sections as
                 empty dictionaries
         """
-        sections = dict()
-        top_level_section = self.get(section, dict())
+        sections = {}
+        top_level_section = self.get(section, {})
         if top_level_section or missing_as_empty:
             sections[section] = top_level_section
-        outputs = self.get("outputs", dict())
+        outputs = self.get("outputs", {})
         if outputs:
             if outputs_exclusive:
-                sections = dict()
+                sections = {}
             for n, o in enumerate(outputs):
                 current_output_path = f"outputs/{n}/{section}"
-                outputs_section = self.get(current_output_path, dict())
+                outputs_section = self.get(current_output_path, {})
                 if outputs_section or missing_as_empty:
                     sections[current_output_path] = outputs_section
         return sections
@@ -686,7 +681,7 @@ class Recipe:
         See `get` for a description of how **path** works.
         """
         # walk path into nodes/keys
-        nodes, keys = self._walk(path, noraise=True)
+        _nodes, keys = self._walk(path, noraise=True)
 
         # "mkdir -p"
         found_path = "/".join(str(key) for key in keys)
@@ -701,7 +696,7 @@ class Recipe:
 
         # get old content
         content = self.get(path)
-        row, col, end_row, end_col = self.get_raw_range(path)
+        row, col, _end_row, _end_col = self.get_raw_range(path)
         self.meta_yaml[row] = self.meta_yaml[row].replace(str(content), str(value))
         if str(value) not in self.meta_yaml[row]:
             self.meta_yaml[row] = self.meta_yaml[row][:col] + value
@@ -743,7 +738,7 @@ class Recipe:
 
         # get lines covered by keys listed in ``within``
         start: int | None = None
-        for key in self.meta.keys():
+        for key in self.meta:
             lineno = self.meta.lc.key(key)[0]
             if key in within:
                 if start is None:
@@ -903,15 +898,18 @@ class Recipe:
             cast(Any, sys).exit = new_exit
 
         try:
-            with open("/dev/null", "w") as devnull:
-                with redirect_stdout(devnull), redirect_stderr(devnull):
-                    self._conda_meta = conda_build.api.render(
-                        self._conda_tempdir.name,
-                        finalize=finalize,
-                        bypass_env_check=bypass_env_check,
-                        permit_unsatisfiable_variants=permit_unsatisfiable_variants,
-                        **kwargs,
-                    )
+            with (
+                open(os.devnull, "w") as devnull,
+                redirect_stdout(devnull),
+                redirect_stderr(devnull),
+            ):
+                self._conda_meta = conda_build.api.render(
+                    self._conda_tempdir.name,
+                    finalize=finalize,
+                    bypass_env_check=bypass_env_check,
+                    permit_unsatisfiable_variants=permit_unsatisfiable_variants,
+                    **kwargs,
+                )
         except RuntimeError as exc:
             if exc.args[0].startswith("Couldn't extract raw recipe text"):
                 line = self.meta_yaml[0]

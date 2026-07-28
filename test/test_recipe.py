@@ -1,18 +1,17 @@
-import os.path as op
 import os
+import os.path as op
 from pathlib import Path
 
 import pytest
-
 from ruamel.yaml import YAML
 
 from bioconda_utils.recipe import (
-    Recipe,
-    EmptyRecipe,
-    MissingMetaYaml,
-    RenderFailure,
     DuplicateKey,
+    EmptyRecipe,
     MissingKey,
+    MissingMetaYaml,
+    Recipe,
+    RenderFailure,
     load_parallel_iter,
 )
 

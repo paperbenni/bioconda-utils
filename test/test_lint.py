@@ -1,16 +1,16 @@
+import glob
 import os.path as op
 from pathlib import Path
-from ruamel.yaml import YAML
 
-import glob
 import pytest
+from ruamel.yaml import YAML
 
 from bioconda_utils import lint, utils
 from bioconda_utils.utils import ensure_list
 
 yaml = YAML(typ="rt")  # pylint: disable=invalid-name
 
-TEST_DATA = dict()
+TEST_DATA = {}
 
 # gather all linting test case YAML files from lint_cases/ subdirectory
 linting_case_files = glob.glob(op.join(op.dirname(__file__), "lint_cases", "*.yaml"))

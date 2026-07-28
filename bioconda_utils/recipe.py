@@ -277,6 +277,12 @@ class Recipe:
            recipe_dir: Path to recipes folder
            recipe_fname: Relative path to recipe (folder or meta.yaml)
         """
+        # Recipe paths are loosely typed across the codebase: get_recipes()
+        # yields Path, but load_meta_fast() and helpers pass str. Coerce both
+        # arguments so callers may pass either — the operations below
+        # (.name/.parent/.relative_to) require real Path objects.
+        recipe_dir = Path(recipe_dir)
+        recipe_fname = Path(recipe_fname)
         if recipe_fname.name == "meta.yaml":
             recipe_fname = recipe_fname.parent
         recipe = cls(recipe_fname, recipe_dir)

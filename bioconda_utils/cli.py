@@ -1373,7 +1373,7 @@ def autobump(
     try:
         # load and register config
         config_dict = utils.load_config(config)
-        from . import autobump, githubhandler, hosters
+        from . import autobump, githubhandler
 
         if no_follow_graph:
             recipe_source = autobump.RecipeSource(
@@ -1458,9 +1458,10 @@ def autobump(
 
         # Check for new versions and update the SHA afterwards
         if not no_check_version_update:
-            scanner.add(
-                autobump.UpdateVersion, hosters.Hoster.select_hoster, unparsed_urls
-            )
+            # UpdateVersion selects a hoster per-URL via Hoster.select_hoster
+            # directly (hoster_factory is no longer injected), so we pass only
+            # the unparsed-urls output file.
+            scanner.add(autobump.UpdateVersion, unparsed_urls)
             if fetch_requirements:
                 # This attempts to determine dependencies exported by PyPi packages,
                 # requires running setup.py, so only enabled on request.

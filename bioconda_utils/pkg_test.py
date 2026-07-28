@@ -212,11 +212,16 @@ def _test_with_explicit_spec(
 set -eo pipefail
 
 # Install from pre-solved explicit spec (no solver needed)
-conda create --name test --file /opt/explicit_spec.txt --yes --quiet
+conda create --prefix /usr/local --file /opt/explicit_spec.txt --yes --quiet
 
 # Run create-env to set up activation/entrypoint scripts
 # This replicates the POSTINSTALL step from involucro
 create-env --conda=: /usr/local
+
+# Source activation script if present
+if [ -f /usr/local/env-activate.sh ]; then
+    . /usr/local/env-activate.sh
+fi
 
 # Run tests
 {tests}

@@ -101,3 +101,15 @@ def test_pkg_test_custom_base_image(build_pkg):
     built_packages = build_pkg(RECIPE_CUSTOM_BASE)
     for pkg in built_packages:
         pkg_test.build_and_test_mulled_image(pkg, base_image="debian:latest")
+
+
+@pytest.mark.skipif(SKIP_OSX, reason="skipping on osx")
+def test_pkg_test_temporary_container(build_pkg):
+    """
+    Running a test in a temporary container with pre-solved spec.
+    """
+    built_packages = build_pkg(RECIPE_ONE)
+    for pkg in built_packages:
+        res = pkg_test.test_package_in_temporary_container(pkg)
+        assert res is not None
+        assert res.returncode == 0

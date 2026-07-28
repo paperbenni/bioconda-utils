@@ -268,7 +268,21 @@ def build(
                                 conda_image=mulled_conda_image,
                                 live_logs=live_logs,
                             )
-                        except (OSError, RuntimeError, ValueError) as exc:
+                        except (
+                            OSError,
+                            RuntimeError,
+                            ValueError,
+                            sp.CalledProcessError,
+                        ) as exc:
+                            # The pre-solved container test runs the recipe's
+                            # tests inside the create-env image via utils.run,
+                            # which raises CalledProcessError on any non-zero
+                            # exit -- e.g. the pre-existing create-env
+                            # EnvironmentLocationNotFound failure, a failing
+                            # test command, or a missing image. As on master,
+                            # treat any pre-solve failure as "fall back to the
+                            # mulled-build path" rather than failing the build
+                            # (and skipping its dependents).
                             logger.info(
                                 "Pre-solved test failed (%s), falling back to "
                                 "mulled-build",

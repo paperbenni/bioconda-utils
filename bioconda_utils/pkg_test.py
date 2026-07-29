@@ -151,21 +151,40 @@ def _generate_explicit_spec(
             logger.debug("No LINK actions in dry-run output")
             return None
 
-        # Build @EXPLICIT spec file
+        # Build @EXPLICIT spec file. Under conda 26.x the LINK entries no
+        # longer carry ``url`` or ``md5`` -- only ``base_url`` (the full
+        # channel URL), ``channel`` (the bare channel name), ``dist_name``,
+        # and ``platform``. The authoritative ``url`` and ``md5`` live in the
+        # FETCH entries, so index those by dist name and prefer them. Packages
+        # already cached on the host may appear in LINK but not FETCH; for
+        # those, reconstruct an absolute URL from ``base_url`` (the bare
+        # ``channel`` would yield a relative, unusable path).
+        def _dist_name(fn: str) -> str:
+            for ext in (".conda", ".tar.bz2"):
+                if fn.endswith(ext):
+                    return fn[: -len(ext)]
+            return fn
+
+        fetch_by_dist = {
+            _dist_name(pkg["fn"]): pkg
+            for pkg in actions.get("FETCH", [])
+            if "fn" in pkg
+        }
+
         spec_path = os.path.join(tmpdir, "explicit_spec.txt")
         with open(spec_path, "w") as f:
             f.write("@EXPLICIT\n")
             for pkg in link_actions:
-                url = pkg.get("url")
-                if not url:
-                    # Build URL from channel + subdir + fn
-                    channel = pkg.get("channel", "")
+                dist = pkg.get("dist_name", "")
+                fetch = fetch_by_dist.get(dist)
+                if fetch:
+                    url = fetch.get("url", "")
+                    md5 = fetch.get("md5", "")
+                else:
+                    base_url = pkg.get("base_url") or pkg.get("channel", "")
                     subdir = pkg.get("platform", pkg.get("subdir", ""))
-                    fn = pkg.get("dist_name", "")
-                    if fn and not fn.endswith((".tar.bz2", ".conda")):
-                        fn += ".conda"
-                    url = f"{channel}/{subdir}/{fn}"
-                md5 = pkg.get("md5", "")
+                    url = f"{base_url}/{subdir}/{dist}.conda"
+                    md5 = pkg.get("md5", "")
                 line = url
                 if md5:
                     line += f"#{md5}"

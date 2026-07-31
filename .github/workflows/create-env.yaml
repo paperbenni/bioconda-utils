@@ -80,8 +80,14 @@ jobs:
           bioconda_utils_version=${{ steps.prepare.outputs.bioconda_utils_version }}
 
     - name: Test
+      shell: bash
       run: |
-        set -x
+        set -euxo pipefail
+        cleanup() {
+          buildah rmi --prune || true
+        }
+        trap cleanup EXIT
+
         image='${{ steps.build.outputs.image }}'
         for tag in ${{ steps.build.outputs.tags }} ; do
           buildah manifest inspect \
@@ -101,7 +107,6 @@ jobs:
                 --file=Dockerfile.test \
                 "images/${image}"
             done
-        buildah rmi --prune || true
 
     - if: ${{ github.ref == 'refs/heads/master' }}
       id: publish

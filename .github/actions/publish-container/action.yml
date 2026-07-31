@@ -12,10 +12,6 @@ inputs:
     description: Whitespace-separated tags that may be overwritten.
     required: false
     default: ''
-  expected-architectures:
-    description: Whitespace-separated Linux architectures expected in every remote tag.
-    required: false
-    default: amd64 arm64
   registry:
     description: Registry hostname and namespace.
     required: true
@@ -79,7 +75,6 @@ runs:
     - name: Verify remote architectures
       shell: bash
       env:
-        EXPECTED_ARCHITECTURES: ${{ inputs.expected-architectures }}
         REGISTRY_PATHS: ${{ steps.push.outputs.registry-paths }}
       run: |
         set -euo pipefail
@@ -87,7 +82,7 @@ runs:
         jq -e 'type == "array" and length > 0' > /dev/null \
           <<< "${REGISTRY_PATHS}"
         expected="$({
-          for architecture in ${EXPECTED_ARCHITECTURES} ; do
+          for architecture in amd64 arm64 ; do
             printf '%s\n' "${architecture}"
           done
         } | sort -u | xargs)"

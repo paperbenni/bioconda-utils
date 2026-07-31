@@ -92,8 +92,9 @@ jobs:
           done
 
       - name: Test
+        shell: bash
         run: |
-          set -x
+          set -euxo pipefail
           image='bioconda-utils-build-env-cos7'
           for tag in latest '${{ steps.get-tag.outputs.tag }}' ; do
             buildah manifest inspect "${image}:${tag}" \

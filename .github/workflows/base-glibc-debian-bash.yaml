@@ -117,7 +117,14 @@ jobs:
         done
 
     - name: Test
+      shell: bash
       run: |
+        set -euo pipefail
+        cleanup() {
+          buildah rmi --prune || true
+        }
+        trap cleanup EXIT
+
         image='${{ steps.build.outputs.image }}'
         ids="$(
           for tag in ${{ steps.build.outputs.tags }} ; do
@@ -130,6 +137,7 @@ jobs:
           done
           )"
         ids="$( printf %s "${ids}" | sort -u )"
+        test -n "${ids}"
         for id in ${ids} ; do
           podman history "${id}"
           buildah bud \
@@ -137,7 +145,6 @@ jobs:
             --file=Dockerfile.test \
             "images/${image}"
         done
-        buildah rmi --prune || true
 
     - if: ${{ github.ref == 'refs/heads/master' }}
       id: publish

@@ -76,7 +76,14 @@ jobs:
           packages=${{ matrix.packages }}
 
     - name: Test
+      shell: bash
       run: |
+        set -euo pipefail
+        cleanup() {
+          buildah rmi --prune || true
+        }
+        trap cleanup EXIT
+
         image='${{ steps.buildah-build.outputs.image }}'
         for tag in ${{ steps.buildah-build.outputs.tags }} ; do
           buildah manifest inspect "${image}:${tag}" \
@@ -96,7 +103,6 @@ jobs:
                 --file=Dockerfile.test \
                 'images/${{ env.IMAGE_NAME }}'
           done
-        buildah rmi --prune || true
 
     - if: ${{ github.ref == 'refs/heads/master' }}
       id: publish

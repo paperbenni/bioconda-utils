@@ -14,7 +14,6 @@ if [[ "$#" -ne 2 ]]; then
     exit 2
 fi
 : "${REGISTRY_PATHS:?Set REGISTRY_PATHS to the push action JSON output.}"
-EXPECTED_ARCHITECTURES="${EXPECTED_ARCHITECTURES:-amd64 arm64}"
 jq -e 'type == "array" and length > 0' >/dev/null <<<"${REGISTRY_PATHS}"
 
 test_containerfile="$1"
@@ -25,7 +24,7 @@ while read -r image; do
     raw_manifest="$(skopeo inspect --raw "docker://${image}")"
     repository="${image%:*}"
 
-    for architecture in ${EXPECTED_ARCHITECTURES}; do
+    for architecture in amd64 arm64; do
         if jq -e 'has("manifests")' >/dev/null <<<"${raw_manifest}"; then
             digest="$(
                 jq -er \

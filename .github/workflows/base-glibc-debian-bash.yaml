@@ -140,11 +140,14 @@ jobs:
 
     - if: ${{ github.ref == 'refs/heads/master' }}
       name: Check Tags
+      env:
+        QUAY_BIOCONDA_REPO: ${{ secrets.QUAY_BIOCONDA_REPO }}
       run: |
         # Quay.io does not support immutable images.
         # => Check for duplicate tags to avoid overwriting existing images.
         existing_tags="$(
-          skopeo list-tags docker://quay.io/bioconda/${{ steps.build.outputs.image }} \
+          skopeo list-tags \
+            "docker://${QUAY_BIOCONDA_REPO}/${{ steps.build.outputs.image }}" \
             | jq -r '.Tags[]'
         )" \
         || {

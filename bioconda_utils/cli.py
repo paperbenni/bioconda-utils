@@ -1575,21 +1575,39 @@ def handle_merged_pr(
         use_existing_auth=use_existing_auth,
     )
     if res == UploadResult.NO_ARTIFACTS and fallback == "build":
-        if package_platform is not None:
+        fallback_package_platform = package_platform or utils.RepoData.native_subdir()
+        try:
+            fallback_docker_platform = package_subdir_to_container_platform(
+                fallback_package_platform
+            )
+        except ValueError:
             native_package_platform = utils.RepoData.native_subdir()
-            if package_platform != native_package_platform:
+            if fallback_package_platform != native_package_platform:
                 raise ValueError(
-                    "--fallback build cannot build non-native package platform "
-                    f"{package_platform} from {native_package_platform}"
-                )
+                    "--fallback build cannot build non-native macOS package platform "
+                    f"{fallback_package_platform} from {native_package_platform}"
+                ) from None
+            fallback_docker = False
+            fallback_docker_platform = None
+        else:
+            fallback_docker = True
+
+        fallback_container_platforms = container_platform
+        if (
+            fallback_docker_platform is not None
+            and fallback_container_platforms is None
+        ):
+            fallback_container_platforms = [fallback_docker_platform]
         success = build(
             recipe_folder,
             config,
             git_range=git_range,
+            docker=fallback_docker,
+            platform=fallback_docker_platform,
             anaconda_upload=not dry_run,
             mulled_upload_target=parsed_upload_target if not dry_run else None,
             mulled_test=True,
-            container_platform=container_platform,
+            container_platform=fallback_container_platforms,
             mulled_upload_records=mulled_upload_records,
             use_existing_auth=use_existing_auth,
         )

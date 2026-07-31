@@ -119,7 +119,7 @@ jobs:
     - if: ${{ github.ref == 'refs/heads/master' }}
       name: Test Pushed
       env:
-        REGISTRY_PATHS: ${{ steps.publish.outputs.registry-paths }}
+        TEST_IMAGE: ${{ steps.publish.outputs.test-image }}
       run: |
         .github/scripts/test-pushed-container \
           'images/${{ env.IMAGE_NAME }}/Dockerfile.test' \

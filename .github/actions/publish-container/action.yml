@@ -23,12 +23,9 @@ inputs:
     required: true
 
 outputs:
-  registry-path:
-    description: Fully qualified path of the first pushed tag.
-    value: ${{ steps.push.outputs.registry-path }}
-  registry-paths:
-    description: JSON array containing every fully qualified pushed tag.
-    value: ${{ steps.push.outputs.registry-paths }}
+  test-image:
+    description: Immutable remote manifest reference to use for functional tests.
+    value: ${{ steps.verify.outputs.test-image }}
 
 runs:
   using: composite
@@ -73,6 +70,7 @@ runs:
         password: ${{ inputs.password }}
 
     - name: Verify remote architectures
+      id: verify
       shell: bash
       env:
         REGISTRY_PATHS: ${{ steps.push.outputs.registry-paths }}
@@ -81,11 +79,9 @@ runs:
 
         jq -e 'type == "array" and length > 0' > /dev/null \
           <<< "${REGISTRY_PATHS}"
-        expected="$({
-          for architecture in amd64 arm64 ; do
-            printf '%s\n' "${architecture}"
-          done
-        } | sort -u | xargs)"
+        expected='amd64 arm64'
+        expected_digest=''
+        expected_repository=''
 
         while read -r image ; do
           raw_manifest="$( skopeo inspect --raw "docker://${image}" )"
@@ -110,4 +106,24 @@ runs:
             exit 1
           fi
           printf 'Verified remote architectures for %s: %s\n' "${image}" "${actual}"
+
+          repository="${image%:*}"
+          digest="$(
+            skopeo inspect \
+              --format '{{.Digest}}' \
+              "docker://${image}"
+          )"
+          if [[ -z "${expected_digest}" ]] ; then
+            expected_digest="${digest}"
+            expected_repository="${repository}"
+          elif [[ "${repository}" != "${expected_repository}" \
+            || "${digest}" != "${expected_digest}" ]] ; then
+            printf 'Pushed tag %s does not reference %s@%s.\n' \
+              "${image}" "${expected_repository}" "${expected_digest}"
+            exit 1
+          fi
         done < <( jq -er '.[]' <<< "${REGISTRY_PATHS}" )
+
+        printf 'test-image=%s@%s\n' \
+          "${expected_repository}" "${expected_digest}" \
+          >> "${GITHUB_OUTPUT}"

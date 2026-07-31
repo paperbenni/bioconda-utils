@@ -120,13 +120,10 @@ jobs:
       - name: Test Pushed
         shell: bash
         env:
-          REGISTRY_PATHS: ${{ steps.publish.outputs.registry-paths }}
+          TEST_IMAGE: ${{ steps.publish.outputs.test-image }}
         run: |
           set -euxo pipefail
           .github/scripts/test-pushed-container Dockerfile.test .
 
-          jq -r '.[]' <<< "${REGISTRY_PATHS}" > /tmp/registry-paths.txt
-          while read -r image ; do
-            podman run --rm --pull=always --arch=amd64 "${image}" bioconda-utils --version
-            podman run --rm --pull=always --arch=arm64 "${image}" bioconda-utils --version
-          done < /tmp/registry-paths.txt
+          podman run --rm --pull=always --arch=amd64 "${TEST_IMAGE}" bioconda-utils --version
+          podman run --rm --pull=always --arch=arm64 "${TEST_IMAGE}" bioconda-utils --version

@@ -35,7 +35,7 @@ jobs:
       - id: get-tag
         run: |
           tag=${{ needs.release_please.outputs.tag_name }}
-          printf %s "tag=${tag#v}" >> $GITHUB_OUTPUT
+          printf %s "tag=${tag#v}" >> "${GITHUB_OUTPUT}"
 
       - name: Set up QEMU
         run: |
@@ -102,53 +102,30 @@ jobs:
             podman run --rm --arch=arm64 "${image}:${tag}" bioconda-utils --version
           done
 
-      - name: Check Tags
-        env:
-          # TODO: Store the public repository path as a GitHub variable instead of a secret.
-          QUAY_BIOCONDA_REPO: ${{ secrets.QUAY_BIOCONDA_REPO }}
-        run: |
-          # Quay.io does not support immutable images.
-          # => Check for duplicate tags to avoid overwriting existing images.
-          existing_tags="$(
-            skopeo list-tags \
-              "docker://${QUAY_BIOCONDA_REPO}/bioconda-utils-build-env-cos7" \
-              | jq -r '.Tags[]'
-          )" \
-          || {
-            echo 'Could not list tags via skopeo.'
-            exit 1
-          }
-          for tag in latest '${{ steps.get-tag.outputs.tag }}' ; do
-            case "${tag}" in
-              latest ) ;;
-              * )
-                if printf %s "${existing_tags}" | grep -qxF "${tag}" ; then
-                  printf 'Tag %s already exists!\n' "${tag}"
-                  exit 1
-                fi
-            esac
-          done
-
-      - name: Push To Quay
-        id: push
-        uses: redhat-actions/push-to-registry@v3
+      - name: Publish
+        id: publish
+        uses: ./.github/actions/publish-container
         with:
           image: bioconda-utils-build-env-cos7
           tags: >-
             latest
             ${{ steps.get-tag.outputs.tag }}
+          mutable-tags: latest
+          # TODO: Store the public repository path as a GitHub variable instead of a secret.
           registry: ${{ secrets.QUAY_BIOCONDA_REPO }}
           username: ${{ secrets.QUAY_BIOCONDA_USERNAME }}
           password: ${{ secrets.QUAY_BIOCONDA_TOKEN }}
 
       - name: Test Pushed
+        shell: bash
+        env:
+          REGISTRY_PATHS: ${{ steps.publish.outputs.registry-paths }}
         run: |
           set -euxo pipefail
-          printf %s '${{ steps.push.outputs.registry-paths }}' \
-            | jq -r '.[]' > /tmp/registry-paths.txt
+          .github/scripts/test-pushed-container Dockerfile.test .
+
+          jq -r '.[]' <<< "${REGISTRY_PATHS}" > /tmp/registry-paths.txt
           while read -r image ; do
-            skopeo inspect --raw "docker://${image}" \
-              | jq -e '.manifests | length == 2' > /dev/null
             podman run --rm --pull=always --arch=amd64 "${image}" bioconda-utils --version
             podman run --rm --pull=always --arch=arm64 "${image}" bioconda-utils --version
           done < /tmp/registry-paths.txt

@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+
+# Functionally test each unique architecture image referenced by pushed tags.
+
+set -euo pipefail
+
+cleanup() {
+    buildah rmi --prune || true
+}
+trap cleanup EXIT
+
+if [[ "$#" -ne 2 ]]; then
+    echo 'Usage: test-pushed-container TEST_CONTAINERFILE CONTEXT' >&2
+    exit 2
+fi
+: "${REGISTRY_PATHS:?Set REGISTRY_PATHS to the push action JSON output.}"
+EXPECTED_ARCHITECTURES="${EXPECTED_ARCHITECTURES:-amd64 arm64}"
+jq -e 'type == "array" and length > 0' >/dev/null <<<"${REGISTRY_PATHS}"
+
+test_containerfile="$1"
+context="$2"
+declare -A tested_digests=()
+
+while read -r image; do
+    raw_manifest="$(skopeo inspect --raw "docker://${image}")"
+    repository="${image%:*}"
+
+    for architecture in ${EXPECTED_ARCHITECTURES}; do
+        if jq -e 'has("manifests")' >/dev/null <<<"${raw_manifest}"; then
+            digest="$(
+                jq -er \
+                    --arg architecture "${architecture}" \
+                    '[
+                        .manifests[]
+                        | select(
+                            .platform.os == "linux"
+                            and .platform.architecture == $architecture
+                        )
+                        | .digest
+                    ]
+                    | if length == 1 then .[0]
+                      else error("expected exactly one matching manifest")
+                      end' \
+                    <<<"${raw_manifest}"
+            )"
+        else
+            remote="$(skopeo inspect "docker://${image}")"
+            remote_architecture="$(jq -r '.Architecture' <<<"${remote}")"
+            if [[ "${remote_architecture}" != "${architecture}" ]]; then
+                printf 'Expected architecture %s for %s, found %s.\n' \
+                    "${architecture}" "${image}" "${remote_architecture}" >&2
+                exit 1
+            fi
+            digest="$(jq -er '.Digest' <<<"${remote}")"
+        fi
+
+        if [[ -n "${tested_digests[${digest}]:-}" ]]; then
+            continue
+        fi
+        tested_digests["${digest}"]=1
+
+        base="${repository}@${digest}"
+        printf 'Testing pushed %s image %s\n' "${architecture}" "${base}"
+        buildah build \
+            --pull=always \
+            --arch="${architecture}" \
+            --build-arg=base="${base}" \
+            --file="${test_containerfile}" \
+            "${context}"
+    done
+done < <(jq -er '.[]' <<<"${REGISTRY_PATHS}")

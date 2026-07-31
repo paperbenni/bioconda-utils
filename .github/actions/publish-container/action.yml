@@ -1,0 +1,118 @@
+name: Publish container
+description: Protect immutable tags, push a local image, and verify the remote platforms.
+
+inputs:
+  image:
+    description: Local image or manifest name.
+    required: true
+  tags:
+    description: Whitespace-separated tags to publish.
+    required: true
+  mutable-tags:
+    description: Whitespace-separated tags that may be overwritten.
+    required: false
+    default: ''
+  expected-architectures:
+    description: Whitespace-separated Linux architectures expected in every remote tag.
+    required: false
+    default: amd64 arm64
+  registry:
+    description: Registry hostname and namespace.
+    required: true
+  username:
+    description: Registry username.
+    required: true
+  password:
+    description: Registry password or token.
+    required: true
+
+outputs:
+  registry-path:
+    description: Fully qualified path of the first pushed tag.
+    value: ${{ steps.push.outputs.registry-path }}
+  registry-paths:
+    description: JSON array containing every fully qualified pushed tag.
+    value: ${{ steps.push.outputs.registry-paths }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check immutable tags
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        MUTABLE_TAGS: ${{ inputs.mutable-tags }}
+        REGISTRY: ${{ inputs.registry }}
+        TAGS: ${{ inputs.tags }}
+      run: |
+        set -euo pipefail
+
+        existing_tags="$(
+          skopeo list-tags "docker://${REGISTRY}/${IMAGE}" \
+            | jq -r '.Tags[]'
+        )" \
+        || {
+          echo 'Could not list tags via skopeo.'
+          exit 1
+        }
+
+        for tag in ${TAGS} ; do
+          case " ${MUTABLE_TAGS} " in
+            *" ${tag} "* ) continue ;;
+          esac
+          if printf '%s\n' "${existing_tags}" | grep -qxF "${tag}" ; then
+            printf 'Tag %s already exists!\n' "${tag}"
+            exit 1
+          fi
+        done
+
+    - name: Push
+      id: push
+      uses: redhat-actions/push-to-registry@v3
+      with:
+        image: ${{ inputs.image }}
+        tags: ${{ inputs.tags }}
+        registry: ${{ inputs.registry }}
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+
+    - name: Verify remote architectures
+      shell: bash
+      env:
+        EXPECTED_ARCHITECTURES: ${{ inputs.expected-architectures }}
+        REGISTRY_PATHS: ${{ steps.push.outputs.registry-paths }}
+      run: |
+        set -euo pipefail
+
+        jq -e 'type == "array" and length > 0' > /dev/null \
+          <<< "${REGISTRY_PATHS}"
+        expected="$({
+          for architecture in ${EXPECTED_ARCHITECTURES} ; do
+            printf '%s\n' "${architecture}"
+          done
+        } | sort -u | xargs)"
+
+        while read -r image ; do
+          raw_manifest="$( skopeo inspect --raw "docker://${image}" )"
+          if jq -e 'has("manifests")' > /dev/null <<< "${raw_manifest}" ; then
+            actual="$(
+              jq -r \
+                '.manifests[] | select(.platform.os == "linux") | .platform.architecture' \
+                <<< "${raw_manifest}" \
+                | sort -u \
+                | xargs
+            )"
+          else
+            actual="$(
+              skopeo inspect "docker://${image}" \
+                | jq -r '.Architecture'
+            )"
+          fi
+
+          if [[ "${actual}" != "${expected}" ]] ; then
+            printf 'Unexpected architectures for %s: expected "%s", found "%s".\n' \
+              "${image}" "${expected}" "${actual}"
+            exit 1
+          fi
+          printf 'Verified remote architectures for %s: %s\n' "${image}" "${actual}"
+        done < <( jq -er '.[]' <<< "${REGISTRY_PATHS}" )

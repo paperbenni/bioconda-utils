@@ -37,80 +37,20 @@ jobs:
           tag=${{ needs.release_please.outputs.tag_name }}
           printf %s "tag=${tag#v}" >> "${GITHUB_OUTPUT}"
 
-      - name: Set up QEMU
-        run: |
-          podman run --rm --privileged \
-            docker.io/tonistiigi/binfmt --install arm64
-
-      - name: Install Tools
-        run: |
-          set -eu
-          # jq is not installed in travier/podman-action
-          dnf install -qy \
-            jq
-
-      - name: Build amd64 image
-        id: buildah-build
-        uses: redhat-actions/buildah-build@v3
+      - name: Build and test image
+        id: build
+        uses: ./.github/actions/build-bioconda-utils-container
         with:
-          image: bioconda-utils-build-env-cos7-amd64
-          arch: amd64
-          build-args: |
-            BASE_IMAGE=quay.io/condaforge/linux-anvil-cos7-x86_64
           tags: >-
             latest
             ${{ steps.get-tag.outputs.tag }}
-          containerfiles: |
-            ./Dockerfile
-
-      - name: Build arm64 image
-        id: buildah-build-arm
-        uses: redhat-actions/buildah-build@v3
-        with:
-          image: bioconda-utils-build-env-cos7-arm64
-          arch: arm64
-          build-args: |
-            BASE_IMAGE=quay.io/condaforge/linux-anvil-aarch64
-          tags: >-
-            latest
-            ${{ steps.get-tag.outputs.tag }}
-          containerfiles: |
-            ./Dockerfile
-
-      - name: Assemble multi-arch manifest
-        run: |
-          set -euo pipefail
-          for tag in latest '${{ steps.get-tag.outputs.tag }}' ; do
-            buildah manifest create \
-              "bioconda-utils-build-env-cos7:${tag}"
-            buildah manifest add \
-              "bioconda-utils-build-env-cos7:${tag}" \
-              "bioconda-utils-build-env-cos7-amd64:${tag}"
-            buildah manifest add \
-              "bioconda-utils-build-env-cos7:${tag}" \
-              "bioconda-utils-build-env-cos7-arm64:${tag}"
-          done
-
-      - name: Test
-        shell: bash
-        run: |
-          set -euxo pipefail
-          image='bioconda-utils-build-env-cos7'
-          for tag in latest '${{ steps.get-tag.outputs.tag }}' ; do
-            buildah manifest inspect "${image}:${tag}" \
-              | jq -e '.manifests | length == 2' > /dev/null
-            podman run --rm --arch=amd64 "${image}:${tag}" bioconda-utils --version
-            podman run --rm --arch=arm64 "${image}:${tag}" bioconda-utils --version
-          done
 
       - name: Publish
         id: publish
         uses: ./.github/actions/publish-container
         with:
-          image: bioconda-utils-build-env-cos7
-          tags: >-
-            latest
-            ${{ steps.get-tag.outputs.tag }}
+          image: ${{ steps.build.outputs.image }}
+          tags: ${{ steps.build.outputs.tags }}
           mutable-tags: latest
           # TODO: Store the public repository path as a GitHub variable instead of a secret.
           registry: ${{ secrets.QUAY_BIOCONDA_REPO }}

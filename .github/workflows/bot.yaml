@@ -77,32 +77,13 @@ jobs:
 
     - name: Test
       shell: bash
+      env:
+        LOCAL_IMAGE: ${{ steps.buildah-build.outputs.image }}
+        LOCAL_TAGS: ${{ steps.buildah-build.outputs.tags }}
       run: |
-        set -euo pipefail
-        cleanup() {
-          buildah rmi --prune || true
-        }
-        trap cleanup EXIT
-
-        image='${{ steps.buildah-build.outputs.image }}'
-        for tag in ${{ steps.buildah-build.outputs.tags }} ; do
-          buildah manifest inspect "${image}:${tag}" \
-            | jq -r '.manifests[] | [.platform.architecture, .digest] | @tsv'
-        done \
-          | sort -u \
-          | while read -r architecture digest ; do
-              image_id="$(
-                buildah images --format '{{.ID}} {{.Digest}}' \
-                  | awk -v digest="${digest}" '$2 == digest { print $1; exit }'
-              )"
-              test -n "${image_id}"
-              podman history "${image_id}"
-              buildah bud \
-                --arch="${architecture}" \
-                --build-arg=base="${image_id}" \
-                --file='images/${{ env.IMAGE_NAME }}/Dockerfile.test' \
-                'images/${{ env.IMAGE_NAME }}'
-          done
+        .github/scripts/test-local-container \
+          'images/${{ env.IMAGE_NAME }}/Dockerfile.test' \
+          'images/${{ env.IMAGE_NAME }}'
 
     - if: ${{ github.ref == 'refs/heads/master' }}
       id: publish

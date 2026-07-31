@@ -88,39 +88,19 @@ runs:
     - name: Test
       shell: bash
       env:
-        IMAGE: ${{ steps.metadata.outputs.image }}
-        TAGS: ${{ steps.metadata.outputs.tags }}
+        LOCAL_IMAGE: ${{ steps.metadata.outputs.image }}
+        LOCAL_TAGS: ${{ steps.metadata.outputs.tags }}
       run: |
         set -euo pipefail
 
-        read -r -a tags <<< "${TAGS}"
+        read -r -a tags <<< "${LOCAL_TAGS}"
         for tag in "${tags[@]}" ; do
-          actual="$(
-            buildah manifest inspect "${IMAGE}:${tag}" \
-              | jq -r \
-                '.manifests[] | select(.platform.os == "linux") | .platform.architecture' \
-              | sort -u \
-              | xargs
-          )"
-          if [[ "${actual}" != 'amd64 arm64' ]] ; then
-            printf 'Unexpected architectures for %s:%s: %s\n' \
-              "${IMAGE}" "${tag}" "${actual}" >&2
-            exit 1
-          fi
-
           for architecture in amd64 arm64 ; do
             podman run --rm --pull=never \
               --arch="${architecture}" \
-              "${IMAGE}:${tag}" \
+              "${LOCAL_IMAGE}:${tag}" \
               bioconda-utils --version
           done
         done
 
-        for architecture in amd64 arm64 ; do
-          buildah build \
-            --pull=never \
-            --arch="${architecture}" \
-            --build-arg=base="${IMAGE}:${tags[0]}" \
-            --file=Dockerfile.test \
-            .
-        done
+        .github/scripts/test-local-container Dockerfile.test .

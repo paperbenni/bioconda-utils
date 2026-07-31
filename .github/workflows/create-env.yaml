@@ -104,7 +104,7 @@ jobs:
               buildah bud \
                 --arch="${arch}" \
                 --build-arg=base="${image}:${tag}" \
-                --file=Dockerfile.test \
+                --file="images/${image}/Dockerfile.test" \
                 "images/${image}"
             done
 

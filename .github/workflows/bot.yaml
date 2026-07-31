@@ -100,7 +100,7 @@ jobs:
               buildah bud \
                 --arch="${architecture}" \
                 --build-arg=base="${image_id}" \
-                --file=Dockerfile.test \
+                --file='images/${{ env.IMAGE_NAME }}/Dockerfile.test' \
                 'images/${{ env.IMAGE_NAME }}'
           done
 

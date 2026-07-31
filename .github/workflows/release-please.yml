@@ -20,100 +20,135 @@ jobs:
           package-name: bioconda-utils
 
   publish_containers:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    container:
+      # travier/podman-action contains newer podman/buildah versions.
+      image: quay.io/travier/podman-action
+      options: --privileged
     needs: release_please
     if: needs.release_please.outputs.release_created
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - id: get-tag
         run: |
-          #tag=${{ github.event.release && github.event.release.tag_name || github.sha }}
           tag=${{ needs.release_please.outputs.tag_name }}
           printf %s "tag=${tag#v}" >> $GITHUB_OUTPUT
 
-      - name: Install qemu dependency
+      - name: Set up QEMU
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static
+          podman run --rm --privileged \
+            docker.io/tonistiigi/binfmt --install arm64
 
-      - name: Build x86_64 Image
+      - name: Install Tools
+        run: |
+          set -eu
+          # jq is not installed in travier/podman-action
+          dnf install -qy \
+            jq
+
+      - name: Build amd64 image
         id: buildah-build
-        uses: redhat-actions/buildah-build@v2
+        uses: redhat-actions/buildah-build@v3
         with:
-          image: bioconda-utils-build-env-cos7-x86_64
+          image: bioconda-utils-build-env-cos7-amd64
           arch: amd64
           build-args: |
             BASE_IMAGE=quay.io/condaforge/linux-anvil-cos7-x86_64
           tags: >-
             latest
             ${{ steps.get-tag.outputs.tag }}
-          dockerfiles: |
+          containerfiles: |
             ./Dockerfile
 
-      - name: Push To Quay
-        uses: redhat-actions/push-to-registry@v2
-        with:
-          image: ${{ steps.buildah-build.outputs.image }}
-          tags: ${{ steps.buildah-build.outputs.tags }}
-          registry: ${{ secrets.QUAY_BIOCONDA_REPO }}
-          username: ${{ secrets.QUAY_BIOCONDA_USERNAME }}
-          password: ${{ secrets.QUAY_BIOCONDA_TOKEN }}
-
-      - name: Build ARM Image
+      - name: Build arm64 image
         id: buildah-build-arm
-        uses: redhat-actions/buildah-build@v2
+        uses: redhat-actions/buildah-build@v3
         with:
-          image: bioconda-utils-build-env-cos7-aarch64
+          image: bioconda-utils-build-env-cos7-arm64
           arch: arm64
           build-args: |
             BASE_IMAGE=quay.io/condaforge/linux-anvil-aarch64
           tags: >-
             latest
             ${{ steps.get-tag.outputs.tag }}
-          dockerfiles: |
+          containerfiles: |
             ./Dockerfile
 
+      - name: Assemble multi-arch manifest
+        run: |
+          set -euo pipefail
+          for tag in latest '${{ steps.get-tag.outputs.tag }}' ; do
+            buildah manifest create \
+              "bioconda-utils-build-env-cos7:${tag}"
+            buildah manifest add \
+              "bioconda-utils-build-env-cos7:${tag}" \
+              "bioconda-utils-build-env-cos7-amd64:${tag}"
+            buildah manifest add \
+              "bioconda-utils-build-env-cos7:${tag}" \
+              "bioconda-utils-build-env-cos7-arm64:${tag}"
+          done
+
+      - name: Test
+        run: |
+          set -x
+          image='bioconda-utils-build-env-cos7'
+          for tag in latest '${{ steps.get-tag.outputs.tag }}' ; do
+            buildah manifest inspect "${image}:${tag}" \
+              | jq -e '.manifests | length == 2' > /dev/null
+            podman run --rm --arch=amd64 "${image}:${tag}" bioconda-utils --version
+            podman run --rm --arch=arm64 "${image}:${tag}" bioconda-utils --version
+          done
+
+      - name: Check Tags
+        env:
+          # TODO: Store the public repository path as a GitHub variable instead of a secret.
+          QUAY_BIOCONDA_REPO: ${{ secrets.QUAY_BIOCONDA_REPO }}
+        run: |
+          # Quay.io does not support immutable images.
+          # => Check for duplicate tags to avoid overwriting existing images.
+          existing_tags="$(
+            skopeo list-tags \
+              "docker://${QUAY_BIOCONDA_REPO}/bioconda-utils-build-env-cos7" \
+              | jq -r '.Tags[]'
+          )" \
+          || {
+            echo 'Could not list tags via skopeo.'
+            exit 1
+          }
+          for tag in latest '${{ steps.get-tag.outputs.tag }}' ; do
+            case "${tag}" in
+              latest ) ;;
+              * )
+                if printf %s "${existing_tags}" | grep -qxF "${tag}" ; then
+                  printf 'Tag %s already exists!\n' "${tag}"
+                  exit 1
+                fi
+            esac
+          done
+
       - name: Push To Quay
-        uses: redhat-actions/push-to-registry@v2
+        id: push
+        uses: redhat-actions/push-to-registry@v3
         with:
-          image: ${{ steps.buildah-build-arm.outputs.image }}
-          tags: ${{ steps.buildah-build-arm.outputs.tags }}
+          image: bioconda-utils-build-env-cos7
+          tags: >-
+            latest
+            ${{ steps.get-tag.outputs.tag }}
           registry: ${{ secrets.QUAY_BIOCONDA_REPO }}
           username: ${{ secrets.QUAY_BIOCONDA_USERNAME }}
           password: ${{ secrets.QUAY_BIOCONDA_TOKEN }}
 
-      - name: Push multi-arch manifest to Quay
-        env:
-          QUAY_BIOCONDA_REPO: ${{ secrets.QUAY_BIOCONDA_REPO }}
-          QUAY_BIOCONDA_USERNAME: ${{ secrets.QUAY_BIOCONDA_USERNAME }}
-          QUAY_BIOCONDA_TOKEN: ${{ secrets.QUAY_BIOCONDA_TOKEN }}
+      - name: Test Pushed
         run: |
-          set -euo pipefail
-
-          registry="${QUAY_BIOCONDA_REPO%%/*}"
-          printf %s "${QUAY_BIOCONDA_TOKEN}" \
-            | docker login "${registry}" \
-              --username "${QUAY_BIOCONDA_USERNAME}" \
-              --password-stdin
-
-          for tag in latest '${{ steps.get-tag.outputs.tag }}' ; do
-            docker manifest create \
-              "${QUAY_BIOCONDA_REPO}/bioconda-utils-build-env-cos7:${tag}" \
-              "${QUAY_BIOCONDA_REPO}/bioconda-utils-build-env-cos7-x86_64:${tag}" \
-              "${QUAY_BIOCONDA_REPO}/bioconda-utils-build-env-cos7-aarch64:${tag}"
-            docker manifest annotate \
-              "${QUAY_BIOCONDA_REPO}/bioconda-utils-build-env-cos7:${tag}" \
-              "${QUAY_BIOCONDA_REPO}/bioconda-utils-build-env-cos7-x86_64:${tag}" \
-              --arch amd64
-            docker manifest annotate \
-              "${QUAY_BIOCONDA_REPO}/bioconda-utils-build-env-cos7:${tag}" \
-              "${QUAY_BIOCONDA_REPO}/bioconda-utils-build-env-cos7-aarch64:${tag}" \
-              --arch arm64
-            docker manifest push --purge \
-              "${QUAY_BIOCONDA_REPO}/bioconda-utils-build-env-cos7:${tag}"
-            docker manifest inspect \
-              "${QUAY_BIOCONDA_REPO}/bioconda-utils-build-env-cos7:${tag}"
-          done
+          set -euxo pipefail
+          printf %s '${{ steps.push.outputs.registry-paths }}' \
+            | jq -r '.[]' > /tmp/registry-paths.txt
+          while read -r image ; do
+            skopeo inspect --raw "docker://${image}" \
+              | jq -e '.manifests | length == 2' > /dev/null
+            podman run --rm --pull=always --arch=amd64 "${image}" bioconda-utils --version
+            podman run --rm --pull=always --arch=arm64 "${image}" bioconda-utils --version
+          done < /tmp/registry-paths.txt

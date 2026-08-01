@@ -351,10 +351,11 @@ def build(
             help="Docker platform to build for. Requires --docker.",
         ),
     ] = None,
-    mulled_test: Annotated[
+    mulled_build_and_test: Annotated[
         bool,
         typer.Option(
-            "--mulled-test", help="Run a mulled-build test on the built package"
+            "--mulled-build-and-test",
+            help="Build a mulled container for the package and run the recipe's tests inside it.",
         ),
     ] = False,
     build_script_template: Annotated[
@@ -475,11 +476,11 @@ def build(
             "--disable-live-logs", help="Disable live logging during the build process"
         ),
     ] = False,
-    presolved_mulled_test: Annotated[
+    presolved_mulled_build_and_test: Annotated[
         bool,
         typer.Option(
-            "--presolved-mulled-test/--no-presolved-mulled-test",
-            help="Use the pre-solved mulled test path.",
+            "--presolved-mulled-build-and-test/--no-presolved-mulled-build-and-test",
+            help="Use the pre-solved mulled build-and-test path.",
         ),
     ] = True,
     no_fast_resolve: Annotated[
@@ -566,7 +567,7 @@ def build(
         recipes,
         testonly=test_only,
         force=force,
-        mulled_build_and_test=mulled_test,
+        mulled_build_and_test=mulled_build_and_test,
         docker_builder=docker_builder,
         anaconda_upload=anaconda_upload,
         mulled_upload_target=parsed_upload_target,
@@ -583,7 +584,7 @@ def build(
         live_logs=not disable_live_logs,
         exclude=exclude,
         subdag_depth=subdag_depth,
-        presolved_mulled_build_and_test=presolved_mulled_test,
+        presolved_mulled_build_and_test=presolved_mulled_build_and_test,
         fast_resolve=not no_fast_resolve,
         target_platform=platform,
         mulled_upload_records=mulled_upload_records,
@@ -1490,8 +1491,8 @@ def handle_merged_pr(
     package_platform: Annotated[
         PackageSubdir | None,
         typer.Option(
-            "--package-platform",
-            help="Conda package platform to upload from PR artifacts. Defaults to the native platform.",
+            "--platform",
+            help="Conda package subdirectory to upload from PR artifacts (for example, linux-aarch64). Defaults to the native subdirectory.",
         ),
     ] = None,
     mulled_upload_records: MulledUploadRecordsOpt = None,
@@ -1550,7 +1551,7 @@ def handle_merged_pr(
             platform=fallback_docker_platform,
             anaconda_upload=not dry_run,
             mulled_upload_target=parsed_upload_target if not dry_run else None,
-            mulled_test=True,
+            mulled_build_and_test=True,
             mulled_upload_records=mulled_upload_records,
             use_existing_auth=use_existing_auth,
         )

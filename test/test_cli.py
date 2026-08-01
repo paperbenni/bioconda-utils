@@ -55,14 +55,22 @@ def test_recipe_and_config_are_optional():
 
 def test_build_uses_normalized_option_names():
     command = cast(Any, get_command(cli.app)).commands["build"]
-    option_names = {option for param in command.params for option in param.opts}
+    option_names = {
+        option
+        for param in command.params
+        for option in [*param.opts, *param.secondary_opts]
+    }
 
     assert "--test-only" in option_names
-    assert "--mulled-test" in option_names
+    assert "--mulled-build-and-test" in option_names
     assert "--build-script-template" in option_names
     assert "--package-dir" in option_names
     assert "--skiplist-leaves" in option_names
-    assert "--mulled-build-and-test" not in option_names
+    assert "--mulled-test" not in option_names
+    assert "--presolved-mulled-build-and-test" in option_names
+    assert "--no-presolved-mulled-build-and-test" in option_names
+    assert "--presolved-mulled-test" not in option_names
+    assert "--no-presolved-mulled-test" not in option_names
     assert "--testonly" not in option_names
     assert "--prelint" not in option_names
     assert all("_" not in option for option in option_names if option.startswith("-"))
@@ -79,7 +87,8 @@ def test_platform_options_have_one_source_of_truth_per_command():
 
     assert "--platform" in build_options
     assert "--container-platform" not in build_options
-    assert "--package-platform" in merged_pr_options
+    assert "--platform" in merged_pr_options
+    assert "--package-platform" not in merged_pr_options
     assert "--container-platform" not in merged_pr_options
 
 
@@ -179,6 +188,21 @@ def test_build_parses_typed_platform_option():
     assert context.params["n_workers"] == 1
     assert context.params["recipe_folder"] == Path("recipes")
     assert context.params["config"] == Path("config.yml")
+
+
+def test_handle_merged_pr_parses_conda_platform_option(tmp_path):
+    command = cast(Any, get_command(cli.app)).commands["handle-merged-pr"]
+    recipes = tmp_path / "recipes"
+    recipes.mkdir()
+    config = tmp_path / "config.yml"
+    config.touch()
+
+    context = command.make_context(
+        "handle-merged-pr",
+        [str(recipes), str(config), "--platform", "linux-aarch64"],
+    )
+
+    assert context.params["package_platform"] == cli.PackageSubdir.LINUX_AARCH64
 
 
 def test_build_uses_environment_aware_mulled_image_default():

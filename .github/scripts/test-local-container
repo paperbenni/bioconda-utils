@@ -43,8 +43,10 @@ done
 base="${LOCAL_IMAGE}:${tag_list[0]}"
 for architecture in amd64 arm64; do
     printf 'Testing local %s image %s\n' "${architecture}" "${base}"
+    # The manifest under test is known to exist locally, but the test
+    # Containerfile may use additional base images in later stages.
     buildah build \
-        --pull=never \
+        --pull=missing \
         --arch="${architecture}" \
         --build-arg=base="${base}" \
         --file="${test_containerfile}" \

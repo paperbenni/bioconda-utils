@@ -2,6 +2,7 @@ import zipfile
 from pathlib import Path
 from typing import cast
 
+import pytest
 from github.CheckRun import CheckRun
 from github.Repository import Repository
 
@@ -172,7 +173,6 @@ def test_upload_pr_artifacts_filters_packages_and_arm64_images(monkeypatch, tmp_
         mulled_upload_target=BIOCONTAINERS,
         artifact_source="github-actions",
         package_platform=PackageSubdir.LINUX_AARCH64,
-        container_platforms=[ContainerPlatform.LINUX_ARM64],
     )
 
     assert result == artifacts.UploadResult.SUCCESS
@@ -250,14 +250,19 @@ def test_upload_pr_artifacts_dryrun_counts_matching_artifacts(monkeypatch, tmp_p
     assert result == artifacts.UploadResult.SUCCESS
 
 
-def test_mulled_artifact_target_platform_allows_ambient_registry_auth(monkeypatch):
-    monkeypatch.delenv("QUAY_LOGIN", raising=False)
-    monkeypatch.delenv("QUAY_OAUTH_TOKEN", raising=False)
-
-    assert (
-        artifacts._mulled_artifact_target_platform([ContainerPlatform.LINUX_ARM64])
-        == ContainerPlatform.LINUX_ARM64
+def test_upload_pr_artifacts_rejects_macos_mulled_upload(monkeypatch):
+    monkeypatch.setattr(
+        artifacts.utils.RepoData,
+        "native_subdir",
+        lambda: PackageSubdir.OSX_ARM64,
     )
+
+    with pytest.raises(ValueError, match="cannot be installed in Linux"):
+        artifacts.upload_pr_artifacts(
+            "bioconda/bioconda-recipes",
+            "abc123",
+            mulled_upload_target=BIOCONTAINERS,
+        )
 
 
 def test_upload_pr_artifacts_uses_archive_platform_not_filename(monkeypatch, tmp_path):
@@ -301,7 +306,6 @@ def test_upload_pr_artifacts_uses_archive_platform_not_filename(monkeypatch, tmp
         mulled_upload_target=BIOCONTAINERS,
         artifact_source="github-actions",
         package_platform=PackageSubdir.LINUX_AARCH64,
-        container_platforms=[ContainerPlatform.LINUX_ARM64],
     )
 
     assert result == artifacts.UploadResult.FAILURE

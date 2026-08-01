@@ -9,7 +9,6 @@ import logging
 import os
 import subprocess as sp
 from collections import defaultdict
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -96,7 +95,7 @@ def build(
     live_logs: bool = True,
     presolved_mulled_build_and_test: bool = True,
     mulled_upload_target: QuayUploadTarget | None = None,
-    container_platforms: Sequence[ContainerPlatform] | None = None,
+    target_platform: ContainerPlatform | None = None,
     use_existing_auth: bool = False,
 ) -> BuildResult:
     """
@@ -118,6 +117,8 @@ def build(
       linter: Linter to use for checking recipes
       record_build_failure: If True, record build failures in a file next to the meta.yaml
       dag: optional nx.DiGraph with dependency information
+      target_platform: Docker/OCI platform for the package build's matching
+        mulled container. None uses the native platform.
       skiplist_leaves: If True, blacklist leaf packages that fail to build
       live_logs: If True, enable live logging during the build process
       use_existing_auth: Use existing Docker/skopeo registry auth when no
@@ -245,60 +246,39 @@ def build(
         logger.info("BUILD AND TEST START via mulled-build %s", recipe)
         mulled_images: list[MulledImage] = []
         # Use pre-solved test env unless we need the mulled-build image for upload
-        requested_platforms: list[ContainerPlatform | None] = (
-            list(container_platforms) if container_platforms else [None]
-        )
         for pkg_path in pkg_paths:
-            for target_platform in requested_platforms:
-                use_temporary_test_container = (
-                    presolved_mulled_build_and_test
-                    and not mulled_upload_target
-                    and container_platform_is_native(target_platform)
+            use_temporary_test_container = (
+                presolved_mulled_build_and_test
+                and not mulled_upload_target
+                and container_platform_is_native(target_platform)
+            )
+            built_mulled_image = False
+            try:
+                report_resources(
+                    f"Starting mulled build for {pkg_path} on {target_platform or 'native'}"
                 )
-                built_mulled_image = False
-                try:
-                    report_resources(
-                        f"Starting mulled build for {pkg_path} on {target_platform or 'native'}"
-                    )
-                    if use_temporary_test_container:
-                        try:
-                            result = pkg_test.test_package_in_temporary_container(
-                                pkg_path,
-                                base_image=base_image,
-                                conda_image=mulled_conda_image,
-                                live_logs=live_logs,
-                            )
-                        except (
-                            OSError,
-                            RuntimeError,
-                            ValueError,
-                            sp.CalledProcessError,
-                        ) as exc:
-                            # The pre-solved container test runs the recipe's
-                            # tests inside the create-env image via utils.run,
-                            # which raises CalledProcessError on any non-zero
-                            # exit -- e.g. the pre-existing create-env
-                            # EnvironmentLocationNotFound failure, a failing
-                            # test command, or a missing image. As on master,
-                            # treat any pre-solve failure as "fall back to the
-                            # mulled-build path" rather than failing the build
-                            # (and skipping its dependents).
-                            logger.info(
-                                "Pre-solved test failed (%s), falling back to "
-                                "mulled-build",
-                                exc,
-                            )
-                            result = None
-                        if result is None:
-                            pkg_test.build_and_test_mulled_image(
-                                pkg_path,
-                                base_image=base_image,
-                                conda_image=mulled_conda_image,
-                                live_logs=live_logs,
-                                target_platform=target_platform,
-                            )
-                            built_mulled_image = True
-                    else:
+                if use_temporary_test_container:
+                    try:
+                        result = pkg_test.test_package_in_temporary_container(
+                            pkg_path,
+                            base_image=base_image,
+                            conda_image=mulled_conda_image,
+                            live_logs=live_logs,
+                        )
+                    except (
+                        OSError,
+                        RuntimeError,
+                        ValueError,
+                        sp.CalledProcessError,
+                    ) as exc:
+                        # A failure in the faster pre-solved path is recoverable:
+                        # retry through mulled-build before failing the recipe.
+                        logger.info(
+                            "Pre-solved test failed (%s), falling back to mulled-build",
+                            exc,
+                        )
+                        result = None
+                    if result is None:
                         pkg_test.build_and_test_mulled_image(
                             pkg_path,
                             base_image=base_image,
@@ -307,19 +287,26 @@ def build(
                             target_platform=target_platform,
                         )
                         built_mulled_image = True
-                except sp.CalledProcessError:
-                    logger.error("TEST FAILED: %s", recipe)
-                    return BuildResult(False, None)
-                finally:
-                    report_resources(
-                        f"Finished mulled build for {pkg_path} on {target_platform or 'native'}"
+                else:
+                    pkg_test.build_and_test_mulled_image(
+                        pkg_path,
+                        base_image=base_image,
+                        conda_image=mulled_conda_image,
+                        live_logs=live_logs,
+                        target_platform=target_platform,
                     )
-                logger.info("TEST SUCCESS %s", recipe)
-                if built_mulled_image:
-                    image_spec = pkg_test.get_image_name(pkg_path)
-                    mulled_images.append(
-                        mulled_image_metadata(image_spec, target_platform)
-                    )
+                    built_mulled_image = True
+            except sp.CalledProcessError:
+                logger.error("TEST FAILED: %s", recipe)
+                return BuildResult(False, None)
+            finally:
+                report_resources(
+                    f"Finished mulled build for {pkg_path} on {target_platform or 'native'}"
+                )
+            logger.info("TEST SUCCESS %s", recipe)
+            if built_mulled_image:
+                image_spec = pkg_test.get_image_name(pkg_path)
+                mulled_images.append(mulled_image_metadata(image_spec, target_platform))
         return BuildResult(True, mulled_images)
 
     return BuildResult(True, None)
@@ -488,7 +475,7 @@ def build_recipes(
     subdag_depth: int | None = None,
     presolved_mulled_build_and_test: bool = True,
     fast_resolve: bool = True,
-    container_platforms: Sequence[ContainerPlatform] | None = None,
+    target_platform: ContainerPlatform | None = None,
     mulled_upload_records: Path | None = None,
     use_existing_auth: bool = False,
 ) -> bool:
@@ -521,6 +508,8 @@ def build_recipes(
       keep_old_work: Do not remove anything from environment, even after successful build and test.
       use_existing_auth: Use existing Docker/skopeo registry auth when no
         QUAY_LOGIN or QUAY_OAUTH_TOKEN is configured.
+      target_platform: Docker/OCI platform for mulled operations. It is the
+        same platform used to build the package.
       skiplist_leaves: If True, blacklist leaf packages that fail to build
       live_logs: If True, enable live logging during the build process
       exclude: list of recipes to exclude. Typically used for
@@ -678,7 +667,7 @@ def build_recipes(
             live_logs=live_logs,
             presolved_mulled_build_and_test=presolved_mulled_build_and_test,
             mulled_upload_target=mulled_upload_target,
-            container_platforms=container_platforms,
+            target_platform=target_platform,
             use_existing_auth=use_existing_auth,
         )
 

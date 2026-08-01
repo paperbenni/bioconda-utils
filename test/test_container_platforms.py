@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from bioconda_utils import _types, build, cli, docker_utils, pkg_test, upload
+from bioconda_utils import _types, build, docker_utils, pkg_test, upload
 from bioconda_utils._types import ContainerPlatform, PackageSubdir, PkgBuildRef
 
 SAMTOOLS_1_3_0 = PkgBuildRef(name="samtools", version="1.3", build_string="0")
@@ -62,78 +62,6 @@ def test_docker_platform_tag_suffix_matches_mulled_build_convention(monkeypatch)
 
     monkeypatch.setattr(_types.platform, "machine", lambda: "aarch64")
     assert _types.docker_platform_tag_suffix(None) == "arm64"
-
-
-def test_cli_rejects_docker_build_container_platform_mismatch():
-    with pytest.raises(ValueError, match="linux-aarch64 packages require linux/arm64"):
-        cli._validate_container_platforms_for_build(
-            docker=True,
-            platform=ContainerPlatform.LINUX_ARM64,
-            container_platform=[
-                ContainerPlatform.LINUX_AMD64,
-                ContainerPlatform.LINUX_ARM64,
-            ],
-        )
-
-
-def test_cli_rejects_native_build_container_platform_mismatch(monkeypatch):
-    monkeypatch.setattr(
-        cli.utils.RepoData, "native_subdir", lambda: PackageSubdir.LINUX_64
-    )
-
-    with pytest.raises(ValueError, match="linux-64 packages require linux/amd64"):
-        cli._validate_container_platforms_for_build(
-            docker=False,
-            platform=None,
-            container_platform=[ContainerPlatform.LINUX_ARM64],
-        )
-
-
-def test_cli_accepts_matching_container_platform(monkeypatch):
-    monkeypatch.setattr(
-        cli.utils.RepoData, "native_subdir", lambda: PackageSubdir.LINUX_64
-    )
-
-    cli._validate_container_platforms_for_build(
-        docker=False,
-        platform=None,
-        container_platform=[ContainerPlatform.LINUX_AMD64],
-    )
-
-
-def test_handle_merged_pr_fallback_rejects_container_platform_mismatch(
-    monkeypatch, tmp_path
-):
-    recipe_folder = tmp_path / "recipes"
-    recipe_folder.mkdir()
-    config = tmp_path / "config.yaml"
-    config.write_text("channels: []\n", encoding="utf-8")
-
-    monkeypatch.setattr(
-        cli.utils.RepoData, "native_subdir", lambda: PackageSubdir.LINUX_AARCH64
-    )
-    monkeypatch.setattr(
-        cli,
-        "upload_pr_artifacts",
-        lambda *_args, **_kwargs: cli.UploadResult.NO_ARTIFACTS,
-    )
-    monkeypatch.setattr(cli.utils, "load_config", lambda _config: {})
-    monkeypatch.setattr(cli, "get_recipes", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(
-        cli,
-        "build_recipes",
-        lambda *_args, **_kwargs: pytest.fail("build should not start"),
-    )
-
-    with pytest.raises(ValueError, match="linux-aarch64 packages require linux/arm64"):
-        cli.handle_merged_pr(
-            recipe_folder,
-            config,
-            repo="bioconda/bioconda-recipes",
-            git_range="base...head",
-            package_platform=PackageSubdir.LINUX_AARCH64,
-            container_platform=[ContainerPlatform.LINUX_AMD64],
-        )
 
 
 def test_mulled_image_metadata_records_target_platform():

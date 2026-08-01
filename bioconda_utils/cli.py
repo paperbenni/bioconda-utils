@@ -40,8 +40,6 @@ from ._types import (
     ContainerPlatform,
     PackageSubdir,
     QuayUploadTarget,
-    container_platform_to_package_subdir,
-    package_subdir_to_container_platform,
     parse_quay_upload_target,
 )
 from .build import build_recipes
@@ -95,38 +93,6 @@ def _resolve_mulled_upload_records(
     if upload_target:
         return DEFAULT_MULLED_RECORDS_DIR
     return None
-
-
-def _build_package_platform(
-    docker: bool, platform: ContainerPlatform | None
-) -> PackageSubdir:
-    if docker and platform:
-        return container_platform_to_package_subdir(platform)
-    return utils.RepoData.native_subdir()
-
-
-def _validate_container_platforms_for_build(
-    *,
-    docker: bool,
-    platform: ContainerPlatform | None,
-    container_platform: list[ContainerPlatform] | None,
-) -> None:
-    if not container_platform:
-        return
-    package_platform = _build_package_platform(docker, platform)
-    try:
-        expected = package_subdir_to_container_platform(package_platform)
-    except ValueError as exc:
-        raise ValueError(
-            "--container-platform cannot be used with package platform "
-            f"{package_platform}; mulled containers are Linux-only"
-        ) from exc
-    if set(container_platform) != {expected}:
-        requested = ", ".join(container_platform)
-        raise ValueError(
-            "--container-platform must match the package build platform: "
-            f"{package_platform} packages require {expected}, not {requested}"
-        )
 
 
 def _validate_positive_int(value: int) -> int:
@@ -228,13 +194,6 @@ GitRangeOpt = Annotated[
             "Select changes on REF since its merge base with BASE. "
             "BASE alone means BASE...HEAD."
         ),
-    ),
-]
-ContainerPlatformOpt = Annotated[
-    list[ContainerPlatform] | None,
-    typer.Option(
-        "--container-platform",
-        help="Docker platform to build, test, or push for mulled containers. May be repeated.",
     ),
 ]
 UseExistingAuthOpt = Annotated[
@@ -529,7 +488,6 @@ def build(
             help="Disable fast resolve: always run the full finalized conda solver on the host, even when building with Docker. Useful for debugging build string mismatches.",
         ),
     ] = False,
-    container_platform: ContainerPlatformOpt = None,
     mulled_upload_records: MulledUploadRecordsOpt = None,
     use_existing_auth: UseExistingAuthOpt = False,
     exclude: Annotated[
@@ -565,13 +523,6 @@ def build(
     recipes = get_recipes(cfg, recipe_folder, package_patterns, parsed_git_range)
     if platform and not docker:
         raise typer.BadParameter("requires --docker", param_hint="--platform")
-    if docker and platform and container_platform is None:
-        container_platform = [platform]
-    _validate_container_platforms_for_build(
-        docker=docker,
-        platform=platform,
-        container_platform=container_platform,
-    )
     if docker:
         if build_script_template is not None:
             build_script_content = build_script_template.read_text()
@@ -633,7 +584,7 @@ def build(
         subdag_depth=subdag_depth,
         presolved_mulled_build_and_test=presolved_mulled_test,
         fast_resolve=not no_fast_resolve,
-        container_platforms=container_platform,
+        target_platform=platform,
         mulled_upload_records=mulled_upload_records,
         use_existing_auth=use_existing_auth,
     )
@@ -1535,7 +1486,6 @@ def handle_merged_pr(
             help="Application hosting build artifacts (e.g., Azure, Circle CI, or GitHub Actions).",
         ),
     ] = "azure",
-    container_platform: ContainerPlatformOpt = None,
     package_platform: Annotated[
         PackageSubdir | None,
         typer.Option(
@@ -1570,7 +1520,6 @@ def handle_merged_pr(
         label=label,
         artifact_source=artifact_source,
         package_platform=package_platform,
-        container_platforms=container_platform,
         mulled_upload_records=mulled_upload_records,
         use_existing_auth=use_existing_auth,
     )
@@ -1589,7 +1538,6 @@ def handle_merged_pr(
             anaconda_upload=not dry_run,
             mulled_upload_target=parsed_upload_target if not dry_run else None,
             mulled_test=True,
-            container_platform=container_platform,
             mulled_upload_records=mulled_upload_records,
             use_existing_auth=use_existing_auth,
         )

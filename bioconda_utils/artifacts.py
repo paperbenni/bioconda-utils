@@ -24,6 +24,7 @@ from bioconda_utils._types import (
     PackageSubdir,
     QuayUploadTarget,
     docker_platform_tag_suffix,
+    package_subdir_to_container_platform,
 )
 from bioconda_utils.container_manifests import (
     resolve_registry_creds,
@@ -126,20 +127,6 @@ def _upload_packages(
             logger.info(f"Uploading {pkg} to anaconda.org.")
             success.append(anaconda_upload(pkg, label=label))
     return success
-
-
-def _mulled_artifact_target_platform(
-    container_platforms: list[ContainerPlatform] | None,
-) -> ContainerPlatform:
-    """Validate and return the single container platform represented by an artifact."""
-    selected_container_platforms = (
-        set(container_platforms) if container_platforms is not None else None
-    )
-    if not selected_container_platforms:
-        raise ValueError("container_platforms is required for mulled artifact uploads")
-    if len(selected_container_platforms) != 1:
-        raise ValueError("Artifact upload requires exactly one container platform")
-    return next(iter(selected_container_platforms))
 
 
 def _canonical_image_ref(
@@ -249,13 +236,17 @@ def upload_pr_artifacts(
     label: str | None = None,
     artifact_source: ArtifactSource = "azure",
     package_platform: PackageSubdir | None = None,
-    container_platforms: list[ContainerPlatform] | None = None,
     mulled_upload_records: Path | None = None,
     use_existing_auth: bool = False,
 ) -> UploadResult:
     """Upload package and image artifacts from the PR associated with git_sha."""
     if package_platform is None:
         package_platform = utils.RepoData.native_subdir()
+    target_platform = (
+        package_subdir_to_container_platform(package_platform)
+        if mulled_upload_target
+        else None
+    )
     job_platform = _job_platform_from_package_platform(package_platform)
 
     gh = utils.get_github_client()
@@ -282,11 +273,6 @@ def upload_pr_artifacts(
         logger.info("No artifacts found.")
         return UploadResult.NO_ARTIFACTS
 
-    target_platform = (
-        _mulled_artifact_target_platform(container_platforms)
-        if mulled_upload_target
-        else None
-    )
     if mulled_upload_target and not dryrun:
         resolve_registry_creds(use_existing_auth=use_existing_auth)
 

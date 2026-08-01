@@ -68,6 +68,21 @@ def test_build_uses_normalized_option_names():
     assert all("_" not in option for option in option_names if option.startswith("-"))
 
 
+def test_platform_options_have_one_source_of_truth_per_command():
+    commands = cast(Any, get_command(cli.app)).commands
+    build_options = {
+        option for param in commands["build"].params for option in param.opts
+    }
+    merged_pr_options = {
+        option for param in commands["handle-merged-pr"].params for option in param.opts
+    }
+
+    assert "--platform" in build_options
+    assert "--container-platform" not in build_options
+    assert "--package-platform" in merged_pr_options
+    assert "--container-platform" not in merged_pr_options
+
+
 def test_choices_are_enforced_before_command_execution():
     result = runner.invoke(cli.app, ["dag", "--format", "invalid"])
 
@@ -142,25 +157,25 @@ def test_recipe_selection_uses_range_base_and_ref(monkeypatch):
     assert calls == [("feature", "main")]
 
 
-def test_build_parses_typed_and_repeated_options():
+def test_build_parses_typed_platform_option():
     command = cast(Any, get_command(cli.app)).commands["build"]
 
     context = command.make_context(
         "build",
         [
             "--docker",
+            "--platform",
+            "linux/arm64",
             "--packages",
             "one",
             "--packages",
             "two",
-            "--container-platform",
-            "linux/amd64",
         ],
     )
 
     assert context.params["docker"] is True
     assert context.params["packages"] == ("one", "two")
-    assert context.params["container_platform"] == (cli.ContainerPlatform.LINUX_AMD64,)
+    assert context.params["platform"] == cli.ContainerPlatform.LINUX_ARM64
     assert context.params["n_workers"] == 1
     assert context.params["recipe_folder"] == Path("recipes")
     assert context.params["config"] == Path("config.yml")

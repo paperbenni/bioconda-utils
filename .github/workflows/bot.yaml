@@ -93,7 +93,7 @@ jobs:
         image: ${{ steps.buildah-build.outputs.image }}
         tags: ${{ steps.buildah-build.outputs.tags }}
         mutable-tags: ${{ matrix.tag }}
-        registry: ${{ secrets.QUAY_BIOCONDA_REPO }}
+        registry: ${{ vars.QUAY_BIOCONDA_REPO }}
         username: ${{ secrets.QUAY_BIOCONDA_USERNAME }}
         password: ${{ secrets.QUAY_BIOCONDA_TOKEN }}
 

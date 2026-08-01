@@ -136,7 +136,7 @@ jobs:
         mutable-tags: >-
           latest
           ${{ env.MAJOR_VERSION }}
-        registry: ${{ secrets.QUAY_BIOCONDA_REPO }}
+        registry: ${{ vars.QUAY_BIOCONDA_REPO }}
         username: ${{ secrets.QUAY_BIOCONDA_USERNAME }}
         password: ${{ secrets.QUAY_BIOCONDA_TOKEN }}
 

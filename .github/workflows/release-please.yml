@@ -53,7 +53,7 @@ jobs:
           tags: ${{ steps.build.outputs.tags }}
           mutable-tags: latest
           # TODO: Store the public repository path as a GitHub variable instead of a secret.
-          registry: ${{ secrets.QUAY_BIOCONDA_REPO }}
+          registry: ${{ vars.QUAY_BIOCONDA_REPO }}
           username: ${{ secrets.QUAY_BIOCONDA_USERNAME }}
           password: ${{ secrets.QUAY_BIOCONDA_TOKEN }}
 

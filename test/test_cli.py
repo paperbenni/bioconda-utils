@@ -92,6 +92,14 @@ def test_platform_options_have_one_source_of_truth_per_command():
     assert "--container-platform" not in merged_pr_options
 
 
+def test_handle_merged_pr_requires_repository_and_git_range():
+    command = cast(Any, get_command(cli.app)).commands["handle-merged-pr"]
+    parameters = {parameter.name: parameter for parameter in command.params}
+
+    assert parameters["repo"].required is True
+    assert parameters["git_range"].required is True
+
+
 def test_choices_are_enforced_before_command_execution():
     result = runner.invoke(cli.app, ["dag", "--format", "invalid"])
 
@@ -199,7 +207,16 @@ def test_handle_merged_pr_parses_conda_platform_option(tmp_path):
 
     context = command.make_context(
         "handle-merged-pr",
-        [str(recipes), str(config), "--platform", "linux-aarch64"],
+        [
+            str(recipes),
+            str(config),
+            "--repo",
+            "bioconda/bioconda-recipes",
+            "--git-range",
+            "HEAD~1...HEAD",
+            "--platform",
+            "linux-aarch64",
+        ],
     )
 
     assert context.params["package_platform"] == cli.PackageSubdir.LINUX_AARCH64

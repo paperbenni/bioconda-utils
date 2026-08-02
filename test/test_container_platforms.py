@@ -84,8 +84,8 @@ def test_handle_merged_pr_linux_fallback_uses_docker(monkeypatch, tmp_path):
 
     with pytest.raises(SystemExit) as exc_info:
         cli.handle_merged_pr(
-            recipe_folder,
-            config,
+            recipe_folder=recipe_folder,
+            config=config,
             repo="bioconda/bioconda-recipes",
             git_range="base...head",
             package_platform=PackageSubdir.LINUX_AARCH64,
@@ -121,8 +121,8 @@ def test_handle_merged_pr_native_macos_fallback_uses_host(monkeypatch, tmp_path)
 
     with pytest.raises(SystemExit) as exc_info:
         cli.handle_merged_pr(
-            recipe_folder,
-            config,
+            recipe_folder=recipe_folder,
+            config=config,
             repo="bioconda/bioconda-recipes",
             git_range="base...head",
             package_platform=PackageSubdir.OSX_ARM64,
@@ -157,8 +157,8 @@ def test_handle_merged_pr_rejects_foreign_macos_fallback(monkeypatch, tmp_path):
 
     with pytest.raises(ValueError, match="cannot build non-native macOS"):
         cli.handle_merged_pr(
-            recipe_folder,
-            config,
+            recipe_folder=recipe_folder,
+            config=config,
             repo="bioconda/bioconda-recipes",
             git_range="base...head",
             package_platform=PackageSubdir.OSX_ARM64,

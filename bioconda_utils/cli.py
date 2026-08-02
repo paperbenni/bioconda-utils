@@ -1455,16 +1455,26 @@ def autobump(
 
 @app.command("handle-merged-pr")
 def handle_merged_pr(
-    recipe_folder: RecipeFolderArg = Path("recipes/"),
-    config: ConfigArg = Path("config.yml"),
     repo: Annotated[
-        str | None,
+        str,
         typer.Option(
             "--repo",
             help="Name of the github repository to check (e.g. bioconda/bioconda-recipes).",
         ),
-    ] = None,
-    git_range: GitRangeOpt = None,
+    ],
+    git_range: Annotated[
+        str,
+        typer.Option(
+            "--git-range",
+            metavar="BASE[...REF]",
+            help=(
+                "Select changes on REF since its merge base with BASE. "
+                "BASE alone means BASE...HEAD."
+            ),
+        ),
+    ],
+    recipe_folder: RecipeFolderArg = Path("recipes/"),
+    config: ConfigArg = Path("config.yml"),
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Do not actually upload anything.")
     ] = False,
@@ -1505,10 +1515,6 @@ def handle_merged_pr(
     """Upload artifacts from a merged pull request."""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
     label = os.getenv("BIOCONDA_LABEL", None) or None
-    if repo is None:
-        raise ValueError("repo is required")
-    if git_range is None:
-        raise ValueError("git_range is required")
     parsed_git_range = _parse_git_range(git_range)
     parsed_upload_target = _parse_quay_upload_target(quay_upload_target)
     mulled_upload_records = _resolve_mulled_upload_records(

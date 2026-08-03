@@ -187,7 +187,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/fissix-24.4.24-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/frozendict-2.4.7-pyh851646a_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/future-1.0.0-pyhd8ed1ab_2.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-25.1.2-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-26.0.1-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-models-26.1.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-util-26.0.1-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/gidgethub-5.4.0-pyhd8ed1ab_0.conda
@@ -327,7 +327,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/fissix-24.4.24-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/frozendict-2.4.7-pyh851646a_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/future-1.0.0-pyhd8ed1ab_2.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-25.1.2-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-26.0.1-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-models-26.1.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-util-26.0.1-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/gidgethub-5.4.0-pyhd8ed1ab_0.conda
@@ -723,7 +723,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/fissix-24.4.24-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/frozendict-2.4.7-pyh851646a_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/future-1.0.0-pyhd8ed1ab_2.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-25.1.2-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-26.0.1-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-models-26.1.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-util-26.0.1-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/gidgethub-5.4.0-pyhd8ed1ab_0.conda
@@ -866,7 +866,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/fissix-24.4.24-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/frozendict-2.4.7-pyh851646a_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/future-1.0.0-pyhd8ed1ab_2.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-25.1.2-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-26.0.1-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-models-26.1.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-util-26.0.1-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/gidgethub-5.4.0-pyhd8ed1ab_0.conda
@@ -3634,13 +3634,13 @@ packages:
   run_exports: {}
   size: 364561
   timestamp: 1738926525117
-- conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-25.1.2-pyhd8ed1ab_0.conda
-  sha256: ef8ac18c9dd4455c90babcb80c0cb76a4aa157fd15128b7dd8db5e35b46172a0
-  md5: e29805a086c2a6580ed8f380c2b134ef
+- conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-26.0.1-pyhd8ed1ab_0.conda
+  sha256: 0350af3ffd53644b8ecb3d5d5a951752fa6233aa39bcf291ab22d7270debe642
+  md5: 1cbbdd0d4a9ffc29c1006fa256694c18
   depends:
   - conda-package-streaming
-  - galaxy-tool-util-models >=25.1
-  - galaxy-util >=25.1
+  - galaxy-tool-util-models >=26.0
+  - galaxy-util >=26.0
   - lxml
   - markupsafe
   - packaging
@@ -3651,10 +3651,11 @@ packages:
   - sortedcontainers
   - typing_extensions
   - whoosh
-  license: AFL-3.0
+  license: MIT
+  license_family: MIT
   run_exports: {}
-  size: 393079
-  timestamp: 1773142544001
+  size: 392831
+  timestamp: 1780823939290
 - conda: https://conda.anaconda.org/conda-forge/noarch/galaxy-tool-util-models-26.1.0-pyhd8ed1ab_0.conda
   sha256: 711c7eba32ef8f2c39e8b6999c19fd0c22c5eb57ec0245f79d27337731c88e2c
   md5: 28dcd8edbda4237a1a19bede6a3383be

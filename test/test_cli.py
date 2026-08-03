@@ -182,7 +182,7 @@ def test_build_parses_typed_platform_option():
         [
             "--docker",
             "--platform",
-            "linux/arm64",
+            "linux-aarch64",
             "--packages",
             "one",
             "--packages",
@@ -192,10 +192,31 @@ def test_build_parses_typed_platform_option():
 
     assert context.params["docker"] is True
     assert context.params["packages"] == ("one", "two")
-    assert context.params["platform"] == cli.ContainerPlatform.LINUX_ARM64
+    assert context.params["platform"] == cli.PackageSubdir.LINUX_AARCH64
     assert context.params["n_workers"] == 1
     assert context.params["recipe_folder"] == Path("recipes")
     assert context.params["config"] == Path("config.yml")
+
+
+def test_build_derives_container_platform_from_package_subdir():
+    assert (
+        cli._container_platform_for_build(cli.PackageSubdir.LINUX_AARCH64, True)
+        == cli.ContainerPlatform.LINUX_ARM64
+    )
+
+
+def test_build_rejects_container_platform_notation():
+    result = runner.invoke(cli.app, ["build", "--docker", "--platform", "linux/arm64"])
+
+    assert result.exit_code == 2
+    assert "linux-aarch64" in result.output
+
+
+def test_build_rejects_macos_package_platform_for_docker():
+    result = runner.invoke(cli.app, ["build", "--docker", "--platform", "osx-arm64"])
+
+    assert result.exit_code == 2
+    assert "is not one of 'linux-64', 'linux-aarch64', 'linux-riscv64'" in result.output
 
 
 def test_handle_merged_pr_parses_conda_platform_option(tmp_path):

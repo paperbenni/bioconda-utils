@@ -94,7 +94,7 @@ def test_handle_merged_pr_linux_fallback_uses_docker(monkeypatch, tmp_path):
     assert exc_info.value.code == 0
     assert len(build_calls) == 1
     assert build_calls[0]["docker"] is True
-    assert build_calls[0]["platform"] == ContainerPlatform.LINUX_ARM64
+    assert build_calls[0]["platform"] == PackageSubdir.LINUX_AARCH64
     assert "container_platform" not in build_calls[0]
 
 

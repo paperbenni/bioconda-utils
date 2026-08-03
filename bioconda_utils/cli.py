@@ -12,7 +12,7 @@ import warnings
 from collections import Counter, defaultdict
 from functools import partial
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 import click
 import conda
@@ -69,6 +69,11 @@ logger = logging.getLogger(__name__)
 
 LogLevel = Literal["debug", "info", "warning", "error", "critical"]
 PackagePatterns = list[str]
+BuildPlatform = Literal[
+    PackageSubdir.LINUX_64,
+    PackageSubdir.LINUX_AARCH64,
+    PackageSubdir.LINUX_RISCV64,
+]
 
 # Shared CLI parameter type aliases
 
@@ -113,6 +118,19 @@ def _parse_git_range_if_needed(git_range: str | None) -> GitRange | None:
     if git_range is None:
         return None
     return _parse_git_range(git_range)
+
+
+def _container_platform_for_build(
+    platform: BuildPlatform | None, docker: bool
+) -> ContainerPlatform | None:
+    if platform is None:
+        return None
+    if not docker:
+        raise typer.BadParameter("requires --docker", param_hint="--platform")
+    try:
+        return package_subdir_to_container_platform(platform)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--platform") from exc
 
 
 def _handle_pdb_exception(command_name: str, pdb: bool) -> bool:
@@ -345,10 +363,10 @@ def build(
         bool, typer.Option("--docker", help="Build packages in docker container.")
     ] = False,
     platform: Annotated[
-        ContainerPlatform | None,
+        BuildPlatform | None,
         typer.Option(
             "--platform",
-            help="Docker platform to build for. Requires --docker.",
+            help="Conda package subdirectory to build. Requires --docker.",
         ),
     ] = None,
     mulled_build_and_test: Annotated[
@@ -510,6 +528,7 @@ def build(
 ) -> None:
     """Build and test Bioconda recipes."""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
+    target_platform = _container_platform_for_build(platform, docker)
     parsed_upload_target = _parse_quay_upload_target(mulled_upload_target)
     mulled_upload_records = _resolve_mulled_upload_records(
         mulled_upload_records, parsed_upload_target
@@ -523,8 +542,6 @@ def build(
         for cmd in setup:
             utils.run(shlex.split(cmd), mask=False)
     recipes = get_recipes(cfg, recipe_folder, package_patterns, parsed_git_range)
-    if platform and not docker:
-        raise typer.BadParameter("requires --docker", param_hint="--platform")
     if docker:
         if build_script_template is not None:
             build_script_content = build_script_template.read_text()
@@ -554,7 +571,7 @@ def build(
             keep_image=keep_image,
             build_image=build_image,
             docker_base_image=docker_base_image,
-            target_platform=platform,
+            target_platform=target_platform,
         )
     else:
         docker_builder = None
@@ -586,7 +603,7 @@ def build(
         subdag_depth=subdag_depth,
         presolved_mulled_build_and_test=presolved_mulled_build_and_test,
         fast_resolve=not no_fast_resolve,
-        target_platform=platform,
+        target_platform=target_platform,
         mulled_upload_records=mulled_upload_records,
         use_existing_auth=use_existing_auth,
     )
@@ -1534,9 +1551,7 @@ def handle_merged_pr(
     if res == UploadResult.NO_ARTIFACTS and fallback == "build":
         fallback_package_platform = package_platform or utils.RepoData.native_subdir()
         try:
-            fallback_docker_platform = package_subdir_to_container_platform(
-                fallback_package_platform
-            )
+            package_subdir_to_container_platform(fallback_package_platform)
         except ValueError:
             native_package_platform = utils.RepoData.native_subdir()
             if fallback_package_platform != native_package_platform:
@@ -1545,16 +1560,17 @@ def handle_merged_pr(
                     f"{fallback_package_platform} from {native_package_platform}"
                 ) from None
             fallback_docker = False
-            fallback_docker_platform = None
+            fallback_build_platform = None
         else:
             fallback_docker = True
+            fallback_build_platform = cast(BuildPlatform, fallback_package_platform)
 
         success = build(
             recipe_folder,
             config,
             git_range=git_range,
             docker=fallback_docker,
-            platform=fallback_docker_platform,
+            platform=fallback_build_platform,
             anaconda_upload=not dry_run,
             mulled_upload_target=parsed_upload_target if not dry_run else None,
             mulled_build_and_test=True,

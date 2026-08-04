@@ -195,7 +195,7 @@ def _descriptor_platform(descriptor: dict[str, Any]) -> ContainerPlatform:
 def _ref_exists(ref: str, creds: str | None) -> bool:
     auth_args, redacted_secrets = skopeo_auth_args(creds, option="--creds")
     result = utils.run(
-        ["skopeo", "inspect", *auth_args, f"docker://{ref}"],
+        ["skopeo", "inspect", "--raw", *auth_args, f"docker://{ref}"],
         redacted_secrets=redacted_secrets,
         env=skopeo_env(),
         check=False,

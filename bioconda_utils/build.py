@@ -626,6 +626,7 @@ def build_recipes(
                 check_channels,
                 force=force,
                 finalize=finalize,
+                target_platform=target_platform,
             )
         except utils.DivergentBuildsError as exc:
             logger.error(

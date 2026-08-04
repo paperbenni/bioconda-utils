@@ -1011,8 +1011,11 @@ def recipe_requires_finalized_render(recipe):
     return bool(_SOLVER_DEPENDENT_JINJA.search(text))
 
 
-def _load_platform_metas(recipe, finalize=True):
-    subdir = RepoData.native_subdir()
+def _load_platform_metas(recipe, finalize=True, target_platform=None):
+    if target_platform is not None:
+        subdir = container_platform_to_package_subdir(target_platform)
+    else:
+        subdir = RepoData.native_subdir()
     config = load_conda_build_config(platform=subdir_to_oslabel(subdir))
     return subdir, load_all_meta(recipe, config=config, finalize=finalize)
 
@@ -1123,13 +1126,13 @@ def _filter_existing_packages(metas, check_channels):
     return new_metas, existing_metas, divergent_builds
 
 
-def get_package_paths(recipe, check_channels, force=False, finalize=True):
+def get_package_paths(recipe, check_channels, force=False, finalize=True, target_platform=None):
     if not force and check_recipe_skippable(recipe, check_channels):
         # NB: If we skip early here, we don't detect possible divergent builds.
         return []
     if not finalize:
         logger.debug("Using non-finalized render for %s (fast resolve)", recipe)
-    _, metas = _load_platform_metas(recipe, finalize=finalize)
+    _, metas = _load_platform_metas(recipe, finalize=finalize, target_platform=target_platform)
 
     # The recipe likely defined skip: True
     if not metas:

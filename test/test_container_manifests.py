@@ -52,6 +52,136 @@ def test_record_roundtrip_and_deduplication(tmp_path):
     assert container_manifests.load_image_records([str(tmp_path)]) == [record]
 
 
+def test_multiarch_ref_strips_build_hash():
+    assert (
+        container_manifests.multiarch_ref(
+            "quay.io/biocontainers/samtools:1.24--h9dcdb79_1"
+        )
+        == "quay.io/biocontainers/samtools:1.24"
+    )
+
+
+def test_multiarch_ref_preserves_variant_prefix():
+    assert (
+        container_manifests.multiarch_ref(
+            "quay.io/biocontainers/htseq:2.1.2--py310h8fb3dee_0"
+        )
+        == "quay.io/biocontainers/htseq:2.1.2--py310"
+    )
+
+
+def test_multiarch_ref_passes_through_version_only_tags():
+    assert (
+        container_manifests.multiarch_ref("quay.io/biocontainers/samtools:1.2")
+        == "quay.io/biocontainers/samtools:1.2"
+    )
+
+
+def test_multiarch_ref_handles_old_style_build_number():
+    assert (
+        container_manifests.multiarch_ref(
+            "quay.io/biocontainers/samtools:1.2--0"
+        )
+        == "quay.io/biocontainers/samtools:1.2"
+    )
+
+
+def test_reconcile_manifests_creates_multiarch_index_from_different_build_hashes(
+    monkeypatch,
+):
+    """Two architectures with different build strings combine under one multi-arch tag."""
+    records = [
+        MulledImageRecord(
+            canonical_ref=f"quay.io/biocontainers/samtools:1.24--{build}",
+            platform=platform,
+            platform_ref=f"quay.io/biocontainers/samtools:1.24--{build}-{suffix}",
+            digest="sha256:" + digest * 64,
+        )
+        for build, platform, suffix, digest in (
+            ("h9dcdb79_1", ContainerPlatform.LINUX_AMD64, "amd64", "a"),
+            ("h391949c_1", ContainerPlatform.LINUX_ARM64, "arm64", "b"),
+        )
+    ]
+    calls = []
+    monkeypatch.setattr(
+        container_manifests,
+        "reconcile_manifest",
+        lambda ref, grouped, *_args, **_kwargs: calls.append((ref, grouped)) or True,
+    )
+
+    assert container_manifests.reconcile_manifests(records) == (3, 3)
+    refs = {ref for ref, _ in calls}
+    # Two exact per-arch tags + one multi-arch tag
+    assert refs == {
+        "quay.io/biocontainers/samtools:1.24--h9dcdb79_1",
+        "quay.io/biocontainers/samtools:1.24--h391949c_1",
+        "quay.io/biocontainers/samtools:1.24",
+    }
+    # The multi-arch call gets both records
+    multiarch_call = next(c for c in calls if c[0] == "quay.io/biocontainers/samtools:1.24")
+    assert len(multiarch_call[1]) == 2
+
+
+def test_reconcile_manifests_separates_variant_matrix_into_distinct_multiarch_tags(
+    monkeypatch,
+):
+    """Different python variants produce different multi-arch tags."""
+    records = [
+        MulledImageRecord(
+            canonical_ref=f"quay.io/biocontainers/htseq:2.1.2--{build}",
+            platform=platform,
+            platform_ref=f"quay.io/biocontainers/htseq:2.1.2--{build}-{suffix}",
+            digest="sha256:" + digest * 64,
+        )
+        for build, platform, suffix, digest in (
+            ("py310h8fb3dee_0", ContainerPlatform.LINUX_AMD64, "amd64", "a"),
+            ("py310h1b7e08d_0", ContainerPlatform.LINUX_ARM64, "arm64", "b"),
+            ("py311hb6b0eea_0", ContainerPlatform.LINUX_AMD64, "amd64", "c"),
+            ("py311hda4d338_0", ContainerPlatform.LINUX_ARM64, "arm64", "d"),
+        )
+    ]
+    calls = []
+    monkeypatch.setattr(
+        container_manifests,
+        "reconcile_manifest",
+        lambda ref, grouped, *_args, **_kwargs: calls.append((ref, grouped)) or True,
+    )
+
+    # 4 exact + 2 multi-arch = 6 groups
+    assert container_manifests.reconcile_manifests(records) == (6, 6)
+    multiarch_refs = {
+        ref for ref, _ in calls
+        if ref not in {r.canonical_ref for r in records}
+    }
+    assert multiarch_refs == {
+        "quay.io/biocontainers/htseq:2.1.2--py310",
+        "quay.io/biocontainers/htseq:2.1.2--py311",
+    }
+    # Each multi-arch group has one record per platform
+    for ref in multiarch_refs:
+        group = next(g for r, g in calls if r == ref)
+        assert len(group) == 2
+        assert {r.platform for r in group} == {
+            ContainerPlatform.LINUX_AMD64,
+            ContainerPlatform.LINUX_ARM64,
+        }
+
+
+def test_reconcile_manifests_rejects_duplicate_platform_in_multiarch_group():
+    """Two records for the same platform under one multi-arch ref is an error."""
+    records = [
+        MulledImageRecord(
+            canonical_ref=f"quay.io/biocontainers/samtools:1.24--{build}",
+            platform=ContainerPlatform.LINUX_AMD64,
+            platform_ref=f"quay.io/biocontainers/samtools:1.24--{build}-amd64",
+            digest="sha256:" + digest * 64,
+        )
+        for build, digest in (("h1111111_1", "a"), ("h2222222_1", "b"))
+    ]
+    with pytest.raises(ValueError, match="Multiple image records"):
+        container_manifests.reconcile_manifests(records)
+
+
 def test_write_image_record_creates_unique_file(tmp_path):
     record = MulledImageRecord(
         canonical_ref="quay.io/biocontainers/samtools:1.20--0",

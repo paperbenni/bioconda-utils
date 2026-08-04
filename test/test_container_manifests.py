@@ -79,9 +79,7 @@ def test_multiarch_ref_passes_through_version_only_tags():
 
 def test_multiarch_ref_handles_old_style_build_number():
     assert (
-        container_manifests.multiarch_ref(
-            "quay.io/biocontainers/samtools:1.2--0"
-        )
+        container_manifests.multiarch_ref("quay.io/biocontainers/samtools:1.2--0")
         == "quay.io/biocontainers/samtools:1.2"
     )
 
@@ -118,7 +116,9 @@ def test_reconcile_manifests_creates_multiarch_index_from_different_build_hashes
         "quay.io/biocontainers/samtools:1.24",
     }
     # The multi-arch call gets both records
-    multiarch_call = next(c for c in calls if c[0] == "quay.io/biocontainers/samtools:1.24")
+    multiarch_call = next(
+        c for c in calls if c[0] == "quay.io/biocontainers/samtools:1.24"
+    )
     assert len(multiarch_call[1]) == 2
 
 
@@ -150,8 +150,7 @@ def test_reconcile_manifests_separates_variant_matrix_into_distinct_multiarch_ta
     # 4 exact + 2 multi-arch = 6 groups
     assert container_manifests.reconcile_manifests(records) == (6, 6)
     multiarch_refs = {
-        ref for ref, _ in calls
-        if ref not in {r.canonical_ref for r in records}
+        ref for ref, _ in calls if ref not in {r.canonical_ref for r in records}
     }
     assert multiarch_refs == {
         "quay.io/biocontainers/htseq:2.1.2--py310",

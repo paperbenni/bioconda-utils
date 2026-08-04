@@ -495,15 +495,11 @@ def reconcile_manifests(
 
     changed = 0
     for ref, ref_records in groups.items():
-        changed += int(
-            reconcile_manifest(ref, ref_records, platforms, creds=creds)
-        )
+        changed += int(reconcile_manifest(ref, ref_records, platforms, creds=creds))
     return changed, len(groups)
 
 
-def _validate_multiarch_group(
-    ref: str, records: list[MulledImageRecord]
-) -> None:
+def _validate_multiarch_group(ref: str, records: list[MulledImageRecord]) -> None:
     """Reject records with conflicting platforms in a multi-arch group.
 
     Each platform (e.g. ``linux/amd64``) must appear at most once. Duplicate

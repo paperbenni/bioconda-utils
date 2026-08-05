@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -72,6 +73,56 @@ def platform_ref(canonical_ref: str, platform: ContainerPlatform) -> str:
             f"Expected a fully-qualified tagged image ref: {canonical_ref}"
         )
     return f"{image_ref}:{tag}-{docker_platform_staging_suffix(platform)}"
+
+
+_BUILD_STRING_RE = re.compile(r"^(?:(.*?)h[0-9a-f]{7})?_?(\d+)$")
+
+
+def _extract_variant_prefix(build_string: str) -> str:
+    """Extract the platform-independent variant prefix from a conda build string.
+
+    Conda build strings have the form ``<variant_prefix>?<hash>_<build_number>``.
+    The hash is always ``h`` followed by exactly 7 hex characters. Everything
+    before the hash is a variant prefix such as ``py310`` or ``r44``; it is
+    empty for packages with no variant matrix.
+
+    >>> _extract_variant_prefix("h9dcdb79_1")
+    ''
+    >>> _extract_variant_prefix("py310h8fb3dee_0")
+    'py310'
+    >>> _extract_variant_prefix("0")
+    ''
+    """
+    m = _BUILD_STRING_RE.match(build_string)
+    if m and m.group(1):
+        return m.group(1)
+    return ""
+
+
+def multiarch_ref(canonical_ref: str) -> str:
+    """Return the platform-independent multi-arch tag for a canonical ref.
+
+    Strips the conda build hash from the tag, preserving version and any
+    variant prefix (e.g. ``py310``). The result is the tag under which a
+    multi-architecture OCI index should be published.
+
+    >>> multiarch_ref("quay.io/biocontainers/samtools:1.24--h9dcdb79_1")
+    'quay.io/biocontainers/samtools:1.24'
+    >>> multiarch_ref("quay.io/biocontainers/htseq:2.1.2--py310h8fb3dee_0")
+    'quay.io/biocontainers/htseq:2.1.2--py310'
+    >>> multiarch_ref("quay.io/biocontainers/samtools:1.2")
+    'quay.io/biocontainers/samtools:1.2'
+    """
+    repository, separator, tag = canonical_ref.rpartition(":")
+    if not separator:
+        return canonical_ref
+    version, version_sep, build_string = tag.partition("--")
+    if not version_sep:
+        return canonical_ref
+    variant_prefix = _extract_variant_prefix(build_string)
+    if variant_prefix:
+        return f"{repository}:{version}--{variant_prefix}"
+    return f"{repository}:{version}"
 
 
 def write_image_record(path: str | Path, record: MulledImageRecord) -> None:
@@ -404,15 +455,63 @@ def reconcile_manifests(
     *,
     creds: str | None = None,
 ) -> tuple[int, int]:
-    """Reconcile each canonical ref represented by uploaded image records.
-    Returns (n_changed, n_total) for logging/progress reporting.
+    """Reconcile exact build refs and shared multi-arch indexes.
+
+    For each unique ``canonical_ref`` (exact conda build string), an OCI index
+    is published at that ref — this preserves the existing per-architecture
+    tags.
+
+    Additionally, records are grouped by :func:`multiarch_ref`, which strips
+    the platform-specific build hash to produce a shared tag such as
+    ``samtools:1.24`` or ``htseq:2.1.2--py310``. A multi-architecture OCI index
+    is published at each multi-arch ref, combining all available platforms.
+    Variant matrices are handled correctly because different variants (e.g.
+    ``py310`` vs ``py312``) produce different multi-arch refs.
+
+    Returns ``(n_changed, n_total)`` for logging/progress reporting.
     """
     records = list(records)
-    canonical_refs = sorted({record.canonical_ref for record in records})
+    groups: dict[str, list[MulledImageRecord]] = {}
+
+    # Exact per-build-string tags (existing behavior, preserved as-is).
+    for canonical_ref in sorted({record.canonical_ref for record in records}):
+        groups[canonical_ref] = [
+            record for record in records if record.canonical_ref == canonical_ref
+        ]
+
+    # Multi-arch tags (new). Group records by their multiarch ref and add
+    # each group that isn't already covered by an exact canonical ref.
+    multiarch_groups: dict[str, list[MulledImageRecord]] = {}
+    for record in records:
+        ref = multiarch_ref(record.canonical_ref)
+        if ref != record.canonical_ref:
+            multiarch_groups.setdefault(ref, []).append(record)
+    for ref in sorted(multiarch_groups):
+        ref_records = multiarch_groups[ref]
+        if ref in groups:
+            continue
+        _validate_multiarch_group(ref, ref_records)
+        groups[ref] = ref_records
+
     changed = 0
-    for canonical_ref in canonical_refs:
-        ref_records = [r for r in records if r.canonical_ref == canonical_ref]
-        changed += int(
-            reconcile_manifest(canonical_ref, ref_records, platforms, creds=creds)
-        )
-    return changed, len(canonical_refs)
+    for ref, ref_records in groups.items():
+        changed += int(reconcile_manifest(ref, ref_records, platforms, creds=creds))
+    return changed, len(groups)
+
+
+def _validate_multiarch_group(ref: str, records: list[MulledImageRecord]) -> None:
+    """Reject records with conflicting platforms in a multi-arch group.
+
+    Each platform (e.g. ``linux/amd64``) must appear at most once. Duplicate
+    platforms indicate either accumulated stale records or a variant matrix
+    that was not separated by the variant prefix — both are unsafe to combine.
+    """
+    by_platform: dict[ContainerPlatform, MulledImageRecord] = {}
+    for record in records:
+        previous = by_platform.get(record.platform)
+        if previous is not None:
+            raise ValueError(
+                f"Multiple image records for {ref} on {record.platform}: "
+                f"{previous.canonical_ref} and {record.canonical_ref}"
+            )
+        by_platform[record.platform] = record

@@ -48,7 +48,6 @@ import tqdm as _tqdm
 import yaml
 from boltons.funcutils import FunctionBuilder
 from colorlog import ColoredFormatter
-from conda.exports import subdir as conda_subdir
 from conda_build import api
 from github import Github
 from jinja2 import Environment, PackageLoader
@@ -1032,12 +1031,14 @@ def _meta_subdir(meta):
     return "noarch" if meta.noarch or meta.noarch_python else meta.config.host_subdir
 
 
-def check_recipe_skippable(recipe, check_channels):
+def check_recipe_skippable(recipe, check_channels, target_platform=None):
     """
     Return True if the same number of builds (per subdir) defined by the recipe
     are already in channel_packages.
     """
-    subdir, metas = _load_platform_metas(recipe, finalize=False)
+    subdir, metas = _load_platform_metas(
+        recipe, finalize=False, target_platform=target_platform
+    )
     # The recipe likely defined skip: True
     if not metas:
         return True
@@ -1056,6 +1057,8 @@ def check_recipe_skippable(recipe, check_channels):
     packages = {
         (meta.name(), meta.version(), int(meta.build_number() or 0)) for meta in metas
     }
+    rendered_subdirs = {_meta_subdir(meta) for meta in metas}
+    queried_subdirs = sorted(rendered_subdirs | {"noarch"})
     r = RepoData()
     num_existing_pkg_builds = Counter(
         (name, version, build_number, subdir)
@@ -1066,7 +1069,7 @@ def check_recipe_skippable(recipe, check_channels):
             version=version,
             build_number=build_number,
             channels=check_channels,
-            native=True,
+            platform=queried_subdirs,
         )
     )
     if num_existing_pkg_builds == Counter():
@@ -1104,6 +1107,8 @@ def _filter_existing_packages(metas, check_channels):
 
     r = RepoData()
     for pkg_key, build_meta in key_build_meta.items():
+        target_subdirs = {pkg_build[0] for pkg_build in build_meta}
+        queried_subdirs = sorted(target_subdirs | {"noarch"})
         existing_pkg_builds = set(
             r.get_package_data(
                 ["subdir", "build"],
@@ -1111,7 +1116,7 @@ def _filter_existing_packages(metas, check_channels):
                 version=pkg_key[1],
                 build_number=pkg_key[2],
                 channels=check_channels,
-                native=True,
+                platform=queried_subdirs,
             )
         )
         for pkg_build, meta in build_meta.items():
@@ -1119,16 +1124,12 @@ def _filter_existing_packages(metas, check_channels):
                 new_metas.append(meta)
             else:
                 existing_metas.append(meta)
-        # Filter the existing_pkg_builds according to the native CPU architecture to avoid
-        # inaccurate divergent build results.
-        #
-        # For example, when a package has only `linux-64` arch type package, if we
-        # build on aarch64 machine, the `divergent_builds` will wrongly include the linux-64
-        # one, we need to filter the non-native CPU architecture versions.
-        native_pkg_builds = {
-            x for x in existing_pkg_builds if x.subdir in (conda_subdir, "noarch")
+        # A build for one target must not be treated as divergent merely because
+        # another target has a different build string.
+        target_pkg_builds = {
+            x for x in existing_pkg_builds if x.subdir in target_subdirs | {"noarch"}
         }
-        for divergent_build in native_pkg_builds - set(build_meta.keys()):
+        for divergent_build in target_pkg_builds - set(build_meta.keys()):
             divergent_builds.add("-".join((pkg_key[0], pkg_key[1], divergent_build[1])))
     return new_metas, existing_metas, divergent_builds
 
@@ -1136,7 +1137,9 @@ def _filter_existing_packages(metas, check_channels):
 def get_package_paths(
     recipe, check_channels, force=False, finalize=True, target_platform=None
 ):
-    if not force and check_recipe_skippable(recipe, check_channels):
+    if not force and check_recipe_skippable(
+        recipe, check_channels, target_platform=target_platform
+    ):
         # NB: If we skip early here, we don't detect possible divergent builds.
         return []
     if not finalize:
@@ -1453,12 +1456,19 @@ class RepoData:
     cache_file = None
     _df = None
     _df_ts = None
+    _subdir_dfs: ClassVar[dict[tuple[tuple[str, ...], str], pd.DataFrame]] = {}
+    _subdir_df_ts: ClassVar[dict[tuple[tuple[str, ...], str], datetime.datetime]] = {}
 
     #: default lifetime for repodata cache
     cache_timeout = 60 * 60 * 8
 
     @classmethod
     def register_config(cls, config):
+        previous_channels = tuple((cls.config or {}).get("channels", ()))
+        current_channels = tuple(config.get("channels", ()))
+        if previous_channels != current_channels:
+            cls._df = None
+            cls._df_ts = None
         cls.config = config
 
     __instance = None
@@ -1533,8 +1543,9 @@ class RepoData:
             res.to_pickle(self.cache_file)
         return res
 
-    def _load_channel_dataframe(self):
-        repos = list(product(self.channels, self.platforms))
+    def _load_channel_dataframe(self, subdirs: Iterable[Subdir] | None = None):
+        selected_subdirs = tuple(self.platforms if subdirs is None else subdirs)
+        repos = list(product(self.channels, selected_subdirs))
         urls = [self._make_repodata_url(c, p) for c, p in repos]
         descs = [f"{c}/{p}" for c, p in repos]
 
@@ -1571,6 +1582,32 @@ class RepoData:
         res = res.reset_index(drop=True)
 
         return res
+
+    def _get_subdir_dataframe(self, subdirs: Iterable[str]) -> pd.DataFrame:
+        """Load and cache only the requested repository subdirectories."""
+        requested = tuple(dict.fromkeys(subdirs))
+        if self._df is not None or self.cache_file is not None:
+            return self.df
+
+        now = datetime.datetime.now(datetime.UTC)
+        channels = tuple(self.channels)
+        missing = [
+            subdir
+            for subdir in requested
+            if (channels, subdir) not in self._subdir_dfs
+            or (now - self._subdir_df_ts[channels, subdir]).total_seconds()
+            > self.cache_timeout
+        ]
+        if missing:
+            loaded = self._load_channel_dataframe(cast(Iterable[Subdir], missing))
+            for subdir in missing:
+                self._subdir_dfs[channels, subdir] = loaded[
+                    loaded["subdir"] == subdir
+                ].copy()
+                self._subdir_df_ts[channels, subdir] = now
+
+        frames = [self._subdir_dfs[channels, subdir] for subdir in requested]
+        return pd.concat(frames) if frames else pd.DataFrame(columns=self.columns)
 
     @staticmethod
     def native_subdir() -> PackageSubdir:
@@ -1622,7 +1659,13 @@ class RepoData:
         if version is not None:
             version = str(version)
 
-        df = self.df
+        if platform is None:
+            df = self.df
+        else:
+            requested_subdirs = (
+                platform if isinstance(platform, (list, tuple)) else [platform]
+            )
+            df = self._get_subdir_dataframe(requested_subdirs)
         # We iteratively drill down here, starting with the (probably)
         # most specific columns. Filtering this way on a large data frame
         # is much faster than executing the comparisons for all values

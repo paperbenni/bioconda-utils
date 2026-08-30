@@ -10,7 +10,9 @@ import tempfile
 import uuid
 from pathlib import Path
 from textwrap import dedent
+from unittest.mock import Mock
 
+import pandas as pd
 import pytest
 from conda_build import api, exceptions, metadata
 from helpers import Recipes, ensure_missing
@@ -1089,6 +1091,98 @@ def test_load_platform_metas_preserves_complete_target_platform(
     assert meta.config.target_subdir == expected_subdir
     assert meta.config.variant["target_platform"] == expected_subdir
     assert Path(api.get_output_file_paths(meta)[0]).parent.name == expected_subdir
+
+
+def test_repodata_loads_only_requested_subdirs(monkeypatch):
+    monkeypatch.setattr(utils.RepoData, "config", {"channels": ["bioconda"]})
+    repodata = utils.RepoData()
+    monkeypatch.setattr(repodata, "_df", None)
+    monkeypatch.setattr(repodata, "cache_file", None)
+    monkeypatch.setattr(repodata, "_subdir_dfs", {})
+    monkeypatch.setattr(repodata, "_subdir_df_ts", {})
+    loaded_subdirs = []
+
+    def load(subdirs=None):
+        selected = tuple(subdirs or repodata.platforms)
+        loaded_subdirs.append(selected)
+        return pd.DataFrame(
+            [
+                {
+                    "name": f"package-{subdir}",
+                    "version": "1",
+                    "build": "0",
+                    "build_number": 0,
+                    "depends": [],
+                    "channel": "bioconda",
+                    "platform": subdir,
+                    "subdir": subdir,
+                }
+                for subdir in selected
+            ],
+            columns=utils.RepoData.columns,
+        )
+
+    monkeypatch.setattr(repodata, "_load_channel_dataframe", load)
+
+    assert set(
+        repodata.get_package_data(
+            "name", platform=[PackageSubdir.LINUX_AARCH64, "noarch"]
+        )
+    ) == {"package-linux-aarch64", "package-noarch"}
+    repodata.get_package_data("name", platform=[PackageSubdir.LINUX_AARCH64])
+
+    assert loaded_subdirs == [(PackageSubdir.LINUX_AARCH64, "noarch")]
+
+
+def test_filter_existing_packages_queries_rendered_target_subdir(monkeypatch):
+    meta = Mock()
+    meta.name.return_value = "samtools"
+    meta.version.return_value = "1.24"
+    meta.build_number.return_value = 1
+    meta.build_id.return_value = "h391949c_1"
+    meta.noarch = False
+    meta.noarch_python = False
+    meta.config.host_subdir = PackageSubdir.LINUX_AARCH64
+    queried_platforms = []
+
+    def get_package_data(_self, _keys, **kwargs):
+        queried_platforms.append(kwargs["platform"])
+        return []
+
+    monkeypatch.setattr(utils.RepoData, "get_package_data", get_package_data)
+
+    assert utils._filter_existing_packages([meta], ["bioconda"]) == ([meta], [], set())
+    assert queried_platforms == [[PackageSubdir.LINUX_AARCH64, "noarch"]]
+
+
+def test_check_recipe_skippable_queries_requested_target(monkeypatch):
+    meta = Mock()
+    meta.name.return_value = "samtools"
+    meta.version.return_value = "1.24"
+    meta.build_number.return_value = 1
+    meta.get_value.return_value = None
+    meta.noarch = False
+    meta.noarch_python = False
+    meta.config.host_subdir = PackageSubdir.LINUX_AARCH64
+    loaded_targets = []
+    queried_platforms = []
+
+    def load_platform_metas(_recipe, *, finalize, target_platform):
+        loaded_targets.append((finalize, target_platform))
+        return PackageSubdir.LINUX_AARCH64, [meta]
+
+    def get_package_data(_self, _key, **kwargs):
+        queried_platforms.append(kwargs["platform"])
+        return []
+
+    monkeypatch.setattr(utils, "_load_platform_metas", load_platform_metas)
+    monkeypatch.setattr(utils.RepoData, "get_package_data", get_package_data)
+
+    assert not utils.check_recipe_skippable(
+        "samtools", ["bioconda"], target_platform=ContainerPlatform.LINUX_ARM64
+    )
+    assert loaded_targets == [(False, ContainerPlatform.LINUX_ARM64)]
+    assert queried_platforms == [[PackageSubdir.LINUX_AARCH64, "noarch"]]
 
 
 def test_native_platform_skipping(config_fixture):

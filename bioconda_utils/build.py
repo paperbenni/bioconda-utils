@@ -29,6 +29,7 @@ from ._types import (
     PkgBuildRef,
     QuayUploadTarget,
     container_platform_is_native,
+    container_platform_to_package_subdir,
     native_container_platform,
 )
 from .container_manifests import write_image_record
@@ -581,7 +582,11 @@ def build_recipes(
     failed_uploads = []
 
     for recipe, name in recipe_jobs:
-        platform = utils.RepoData().native_subdir()
+        platform = (
+            container_platform_to_package_subdir(target_platform)
+            if target_platform is not None
+            else utils.RepoData().native_subdir()
+        )
         if not force and should_skip_platform(recipe_folder, recipe, platform):
             logger.info(
                 "BUILD SKIP: skipping %s for additional platform %s",

@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess as sp
 from unittest.mock import Mock
 
 import pytest
@@ -235,6 +236,84 @@ def test_recipe_builder_build_image_passes_target_platform(monkeypatch, tmp_path
     assert commands
     assert commands[0][0:3] == ["docker", "build", "--platform"]
     assert commands[0][3] == ContainerPlatform.LINUX_ARM64
+
+
+def test_recipe_builder_reuses_matching_local_base_image(monkeypatch):
+    builder = docker_utils.RecipeBuilder.__new__(docker_utils.RecipeBuilder)
+    builder.docker_base_image = "local-build-env:arm64"
+    builder.target_platform = ContainerPlatform.LINUX_ARM64
+    builder.build_image = False
+    builder.keep_image = False
+    pulls = []
+
+    monkeypatch.setattr(
+        docker_utils.sp,
+        "run",
+        lambda *_args, **_kwargs: Mock(returncode=0, stdout="linux/arm64\n"),
+    )
+    monkeypatch.setattr(
+        docker_utils.utils,
+        "run",
+        lambda command, **_kwargs: pulls.append(command),
+    )
+
+    builder._ensure_base_image()
+
+    assert pulls == []
+
+
+def test_recipe_builder_pulls_missing_base_image_for_target(monkeypatch):
+    builder = docker_utils.RecipeBuilder.__new__(docker_utils.RecipeBuilder)
+    builder.docker_base_image = "quay.io/bioconda/build-env:latest"
+    builder.target_platform = ContainerPlatform.LINUX_ARM64
+    builder.build_image = False
+    builder.keep_image = False
+    pulls = []
+
+    monkeypatch.setattr(
+        docker_utils.sp,
+        "run",
+        lambda *_args, **_kwargs: Mock(returncode=1, stdout=""),
+    )
+    monkeypatch.setattr(
+        docker_utils.utils,
+        "run",
+        lambda command, **_kwargs: pulls.append(command),
+    )
+
+    builder._ensure_base_image()
+
+    assert pulls == [
+        [
+            "docker",
+            "pull",
+            "--platform",
+            ContainerPlatform.LINUX_ARM64,
+            "quay.io/bioconda/build-env:latest",
+        ]
+    ]
+
+
+def test_recipe_builder_fails_when_base_image_cannot_be_pulled(monkeypatch):
+    builder = docker_utils.RecipeBuilder.__new__(docker_utils.RecipeBuilder)
+    builder.docker_base_image = "missing-build-env:arm64"
+    builder.target_platform = ContainerPlatform.LINUX_ARM64
+    builder.build_image = False
+    builder.keep_image = False
+
+    monkeypatch.setattr(
+        docker_utils.sp,
+        "run",
+        lambda *_args, **_kwargs: Mock(returncode=1, stdout=""),
+    )
+
+    def fail_pull(command, **_kwargs):
+        raise sp.CalledProcessError(1, command)
+
+    monkeypatch.setattr(docker_utils.utils, "run", fail_pull)
+
+    with pytest.raises(sp.CalledProcessError):
+        builder._ensure_base_image()
 
 
 def test_mulled_upload_passes_target_platform(monkeypatch):

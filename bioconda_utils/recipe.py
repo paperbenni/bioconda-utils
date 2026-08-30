@@ -38,6 +38,7 @@ from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.constructor import DuplicateKeyError
 
 from . import utils
+from ._types import ALL_PACKAGE_SUBDIRS, PackageSubdir
 from .aiopipe import EndProcessingItem
 
 yaml = YAML(typ="rt")  # pylint: disable=invalid-name
@@ -453,14 +454,17 @@ class Recipe:
         return []
 
     @property
-    def additional_platforms(self) -> list:
-        """The extra.additional-platforms list"""
+    def additional_platforms(self) -> list[PackageSubdir]:
+        """The extra.additional-platforms list normalized to PackageSubdir."""
         if (
             "extra" in self.meta
             and self.meta["extra"]
             and "additional-platforms" in self.meta["extra"]
         ):
-            return list(self.meta["extra"]["additional-platforms"])
+            raw = self.meta["extra"]["additional-platforms"]
+            if isinstance(raw, list):
+                valid = set(ALL_PACKAGE_SUBDIRS)
+                return [PackageSubdir(p) for p in raw if p in valid]
         return []
 
     @property

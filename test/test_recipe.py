@@ -336,6 +336,20 @@ def test_recipe_extra_additional_platform_linux(recipes):
 
 
 @with_recipes
+def test_recipe_extra_additional_platform_ignores_invalid(recipes):
+    for recipe in recipes:
+        assert recipe.additional_platforms == []
+        recipe.meta_yaml += [
+            "extra:",
+            "  additional-platforms:",
+            "    - linux-aarch64",
+            "    - osx-x86_64",
+        ]
+        recipe.render()
+        assert recipe.additional_platforms == ["linux-aarch64"]
+
+
+@with_recipes
 def test_get_deps_dict(recipes):
     for recipe in recipes:
         recipe.meta_yaml.extend(

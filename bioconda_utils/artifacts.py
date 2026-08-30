@@ -355,6 +355,8 @@ def fetch_artifacts(
     commit = commits[commits.totalCount - 1]
     # get the artifacts
     check_runs = commit.get_check_runs()
+    if package_platform is not None:
+        package_platform = PackageSubdir(package_platform)
     if job_platform is None or package_platform is None:
         repodata = utils.RepoData()
         package_platform = package_platform or repodata.native_subdir()

@@ -10,3 +10,7 @@ properties:
         type: array
     conda_build_version:
         type: string
+    primary_platforms:
+        type: array
+        items:
+            type: string

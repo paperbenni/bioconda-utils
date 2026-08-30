@@ -9,6 +9,7 @@ import shlex
 import subprocess as sp
 import tempfile
 from collections.abc import Sequence
+from pathlib import Path
 
 from conda_build.metadata import MetaData
 from conda_index.index import update_index
@@ -23,19 +24,20 @@ logger = logging.getLogger(__name__)
 CREATE_ENV_IMAGE = os.getenv("CREATE_ENV_IMAGE", "quay.io/bioconda/create-env:latest")
 
 
-def get_test_command(path: str) -> str:
-    "Extract tests from a built package"
+def get_test_command(path: Path | str) -> str:
+    """Extract tests from a built package"""
+    path = Path(path)
     tmp = tempfile.mkdtemp()
     for tar, member in stream_conda_info(path):
         if member.name.startswith("info/recipe/"):
             tar.extract(member, tmp)
-    input_dir = os.path.join(tmp, "info", "recipe")
+    input_dir = Path(tmp) / "info" / "recipe"
 
     tests = [
         "/usr/local/env-execute true",
         ". /usr/local/env-activate.sh",
     ]
-    recipe_meta = MetaData(input_dir)
+    recipe_meta = MetaData(str(input_dir))
 
     tests_commands = recipe_meta.get_value("test/commands")
     tests_imports = recipe_meta.get_value("test/imports")
@@ -64,25 +66,26 @@ def get_test_command(path: str) -> str:
     return f"bash -c {shlex.quote(tests)}"
 
 
-def get_image_name(path: str) -> PkgBuildRef:
+def get_image_name(path: Path | str) -> PkgBuildRef:
     """
     Returns a package build reference parsed from a built package filename.
 
     Parameters
     ----------
 
-    path : str
-        Path to .tar.bz2 or .conda package build by conda-build
+    path : Path | str
+        Path to .tar.bz2 or .conda package built by conda-build
 
     """
-    if path.endswith(".tar.bz2"):
+    path = Path(path)
+    if path.name.endswith(".tar.bz2"):
         ext = ".tar.bz2"
-    elif path.endswith(".conda"):
+    elif path.name.endswith(".conda"):
         ext = ".conda"
     else:
-        raise ValueError()
+        raise ValueError(f"Unsupported package extension: {path.name}")
 
-    pkg = os.path.basename(path).removesuffix(ext)
+    pkg = path.name.removesuffix(ext)
     toks = pkg.split("-")
     build_string = toks[-1]
     version = toks[-2]
@@ -92,8 +95,8 @@ def get_image_name(path: str) -> PkgBuildRef:
 
 
 def _generate_explicit_spec(
-    spec: PkgBuildRef, channels: Sequence[str], conda_bld_dir: str, tmpdir: str
-) -> str | None:
+    spec: PkgBuildRef, channels: Sequence[str], conda_bld_dir: Path, tmpdir: Path
+) -> Path | None:
     """Generate an @EXPLICIT spec file by dry-running conda create.
 
     Parameters
@@ -102,14 +105,14 @@ def _generate_explicit_spec(
         Package build reference (name, version, build string)
     channels : list
         List of resolved channel URLs (no "local")
-    conda_bld_dir : str
+    conda_bld_dir : Path
         Path to local conda-bld directory
-    tmpdir : str
+    tmpdir : Path
         Directory to write the spec file into
 
     Returns
     -------
-    str or None
+    Path or None
         Path to explicit spec file, or None on failure
     """
     # Convert to conda format (name=version=build)
@@ -171,7 +174,7 @@ def _generate_explicit_spec(
             if "fn" in pkg
         }
 
-        spec_path = os.path.join(tmpdir, "explicit_spec.txt")
+        spec_path = tmpdir / "explicit_spec.txt"
         with open(spec_path, "w") as f:
             f.write("@EXPLICIT\n")
             for pkg in link_actions:
@@ -199,18 +202,18 @@ def _generate_explicit_spec(
 
 
 def _test_with_explicit_spec(
-    spec_path: str,
+    spec_path: Path,
     tests: str,
     base_image: str | None,
     conda_image: str,
-    conda_bld_dir: str,
+    conda_bld_dir: Path,
     live_logs: bool,
 ) -> sp.CompletedProcess:
     """Run mulled test using a pre-solved explicit spec file.
 
     Parameters
     ----------
-    spec_path : str
+    spec_path : Path
         Path to @EXPLICIT spec file
     tests : str
         Test commands to run
@@ -218,7 +221,7 @@ def _test_with_explicit_spec(
         Base image for the test container
     conda_image : str
         Conda image used to install packages
-    conda_bld_dir : str
+    conda_bld_dir : Path
         Path to local conda-bld directory (needed for file:// URLs)
     live_logs : bool
         Enable live log output
@@ -247,9 +250,8 @@ fi
 """
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        script_path = os.path.join(tmpdir, "test_script.bash")
-        with open(script_path, "w") as f:
-            f.write(test_script)
+        script_path = Path(tmpdir) / "test_script.bash"
+        script_path.write_text(test_script)
 
         cmd = [
             "docker",
@@ -281,18 +283,18 @@ fi
 
 
 def _test_inputs(
-    path: str,
+    path: Path | str,
     channels: Sequence[str] = ("conda-forge", "local", "bioconda"),
     update_local_index: bool = True,
-) -> tuple[str, PkgBuildRef, list[str], str]:
+) -> tuple[Path, PkgBuildRef, list[str], str]:
     """Return shared inputs needed for package container tests."""
-    assert path.endswith((".tar.bz2", ".conda")), f"Unrecognized path {path}"
-    # assert os.path.exists(path), '{0} does not exist'.format(path)
+    path = Path(path)
+    assert path.name.endswith((".tar.bz2", ".conda")), f"Unrecognized path {path}"
 
-    conda_bld_dir = os.path.abspath(os.path.dirname(os.path.dirname(path)))
+    conda_bld_dir = path.resolve().parent.parent
 
     if update_local_index:
-        update_index(conda_bld_dir)
+        update_index(str(conda_bld_dir))
 
     spec = get_image_name(path)
 
@@ -311,7 +313,7 @@ def _test_inputs(
 
 
 def test_package_in_temporary_container(
-    path: str,
+    path: Path | str,
     channels: Sequence[str] = ("conda-forge", "local", "bioconda"),
     base_image: str | None = None,
     conda_image: str = CREATE_ENV_IMAGE,
@@ -327,7 +329,7 @@ def test_package_in_temporary_container(
 
     Parameters
     ----------
-    path : str
+    path : Path | str
         Path to a .tar.bz2 or .conda package built by conda-build
 
     channels : list
@@ -342,13 +344,6 @@ def test_package_in_temporary_container(
 
     live_logs : True | bool
         If True, enable live logging during the build process
-
-    Notes
-    -----
-    Must be run from a real script file, not stdin/REPL/``python -c``: the
-    local-channel indexing in :func:`_test_inputs` uses spawn-based
-    multiprocessing workers that cannot re-import a non-file main, failing with
-    an opaque ``BrokenProcessPool``. See :func:`build_and_test_mulled_image`.
     """
     conda_bld_dir, spec, resolved_channels, tests = _test_inputs(path, channels)
 
@@ -357,7 +352,7 @@ def test_package_in_temporary_container(
             spec,
             resolved_channels,
             conda_bld_dir,
-            tmpdir,
+            Path(tmpdir),
         )
         if spec_path is None:
             logger.info("Pre-solve failed, falling back to mulled-build")
@@ -375,7 +370,7 @@ def test_package_in_temporary_container(
 
 
 def build_and_test_mulled_image(
-    path: str,
+    path: Path | str,
     name_override: str | None = None,
     channels: Sequence[str] = ("conda-forge", "local", "bioconda"),
     mulled_args: str = "",
@@ -392,7 +387,7 @@ def build_and_test_mulled_image(
 
     Parameters
     ----------
-    path : str
+    path : Path | str
         Path to a .tar.bz2 or .conda package built by conda-build
 
     name_override : str
@@ -419,17 +414,6 @@ def build_and_test_mulled_image(
 
     target_platform : ContainerPlatform | None
         Docker target platform to pass to mulled-build, e.g. linux/arm64.
-
-    Notes
-    -----
-    Must be invoked from a real script file (e.g. ``python myscript.py`` or via
-    the installed ``bioconda-utils`` CLI), not from stdin, a REPL, or
-    ``python -c``. The local-channel indexing step (:func:`_test_inputs` ->
-    ``conda_index.api.update_index``) uses spawn-based multiprocessing workers,
-    which re-import the main module in each worker; a main program fed via stdin
-    has no file to re-import, so every worker dies and the call fails with an
-    opaque ``concurrent.futures.process.BrokenProcessPool``. The CLI and
-    ``pytest`` are unaffected because they run from real files.
     """
     _conda_bld_dir, spec, resolved_channels, tests = _test_inputs(path, channels)
     channel_args = ["--channels", ",".join(resolved_channels)]
@@ -453,10 +437,10 @@ def build_and_test_mulled_image(
     # galaxy-lib always downloads involucro, unless it's in cwd or its path is explicitly given.
     # We inject a POSTINSTALL to the involucro command with a small wrapper to
     # create activation / entrypoint scripts for the container.
-    involucro_path = os.path.join(os.path.dirname(__file__), "involucro")
-    if not os.path.exists(involucro_path):
+    involucro_path = Path(__file__).parent / "involucro"
+    if not involucro_path.exists():
         raise RuntimeError("internal involucro wrapper missing")
-    cmd += ["--involucro-path", involucro_path]
+    cmd += ["--involucro-path", str(involucro_path)]
 
     logger.debug(f"mulled-build command: {cmd}")
 

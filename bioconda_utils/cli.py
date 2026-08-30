@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import click
-import conda
-import conda.base.constants
 import networkx as nx
 import pandas
 import requests
@@ -37,6 +35,7 @@ from . import cran_skeleton, docker_utils, graph, pkg_test, update_pinnings, uti
 from . import lint as _lint
 from ._types import (
     ALL_CONTAINER_PLATFORMS,
+    ALL_PACKAGE_SUBDIRS,
     ContainerPlatform,
     PackageSubdir,
     QuayUploadTarget,
@@ -1679,16 +1678,12 @@ def annotate_build_failures(
     ] = False,
 ) -> None:
     """Create or update recipe build-failure records."""
-    target_platforms = (
-        platform
-        if platform is not None
-        else [p for p in utils.RepoData.platforms if p != "noarch"]
-    )
+    target_platforms = platform if platform is not None else list(ALL_PACKAGE_SUBDIRS)
     for recipe in recipes:
         if existing_only:
             recipe_platforms = [
                 plat
-                for plat in conda.base.constants.PLATFORM_DIRECTORIES
+                for plat in ALL_PACKAGE_SUBDIRS
                 if BuildFailureRecord(recipe, platform=plat).exists()
             ]
         else:

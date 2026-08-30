@@ -1425,6 +1425,41 @@ def test_native_platform_skipping(config_fixture):
             == result
         )
 
+    # When osx-64 is not in primary_platforms, it requires opt-in
+    assert build.should_skip_platform(
+        Path(os.path.dirname(r.recipe_dirs["one"])),
+        Path(r.recipe_dirs["one"]),
+        PackageSubdir.OSX_64,
+        primary_platforms=[PackageSubdir.LINUX_64],
+    )
+    assert not build.should_skip_platform(
+        Path(os.path.dirname(r.recipe_dirs["one"])),
+        Path(r.recipe_dirs["one"]),
+        PackageSubdir.LINUX_64,
+        primary_platforms=[PackageSubdir.LINUX_64],
+    )
+    # If recipe opts into osx-64, it is not skipped even when osx-64 is non-primary
+    r_osx_optin = Recipes(
+        """
+        osx_pkg:
+          meta.yaml: |
+            package:
+              name: osx_pkg
+              version: "0.1"
+            extra:
+              additional-platforms:
+                - osx-64
+        """,
+        from_string=True,
+    )
+    r_osx_optin.write_recipes()
+    assert not build.should_skip_platform(
+        Path(os.path.dirname(r_osx_optin.recipe_dirs["osx_pkg"])),
+        Path(r_osx_optin.recipe_dirs["osx_pkg"]),
+        PackageSubdir.OSX_64,
+        primary_platforms=[PackageSubdir.LINUX_64],
+    )
+
 
 def test_variants():
     """
@@ -1828,7 +1863,18 @@ def test_normalize_config_applies_defaults_without_mutating_input():
         "channels": ["conda-forge", "bioconda"],
         "requirements": None,
         "upload_channel": "bioconda",
+        "primary_platforms": [PackageSubdir.LINUX_64, PackageSubdir.OSX_64],
     }
+
+
+def test_normalize_config_custom_primary_platforms():
+    config = {
+        "primary_platforms": ["linux-64"],
+    }
+
+    normalized = utils.normalize_config(config)
+
+    assert normalized["primary_platforms"] == [PackageSubdir.LINUX_64]
 
 
 def test_normalize_config_is_idempotent():
@@ -1877,4 +1923,5 @@ def test_load_config_registers_config_after_resolving_paths(monkeypatch, tmp_pat
 
     assert config["blacklists"] == [str(tmp_path / "blacklists/temporary.txt")]
     assert config["channels"] == ["conda-forge", "bioconda"]
+    assert config["primary_platforms"] == [PackageSubdir.LINUX_64, PackageSubdir.OSX_64]
     assert registered == [config]

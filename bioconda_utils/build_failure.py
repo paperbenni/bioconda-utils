@@ -1,5 +1,4 @@
 import logging
-import os
 import subprocess as sp
 import time
 from collections.abc import Iterator
@@ -7,8 +6,6 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-import conda.base.constants
-import conda.exports
 import networkx as nx
 import pandas as pd
 import ruamel.yaml
@@ -17,6 +14,7 @@ from ruamel.yaml import YAML, CommentedMap
 from ruamel.yaml.scalarstring import LiteralScalarString
 
 from bioconda_utils import graph, utils
+from bioconda_utils._types import ALL_PACKAGE_SUBDIRS, PackageSubdir
 from bioconda_utils.recipe import Recipe
 
 from .githandler import BiocondaRepo, GitRange
@@ -27,19 +25,22 @@ logger = logging.getLogger(__name__)
 class BuildFailureRecord:
     git_handler = None
 
-    def __init__(self, recipe: Path | Recipe, platform: str | None = None) -> None:
+    def __init__(
+        self, recipe: Path | Recipe, platform: PackageSubdir | None = None
+    ) -> None:
         if isinstance(recipe, Recipe):
-            self.recipe_path = recipe.path
+            self.recipe_path = Path(recipe.path)
         else:
-            self.recipe_path = recipe
+            self.recipe_path = Path(recipe)
         if platform is None:
-            platform = conda.exports.subdir
-        self.path = os.path.join(self.recipe_path, f"build_failure.{platform}.yaml")
-        self.platform = platform
+            self.platform = utils.RepoData.native_subdir()
+        else:
+            self.platform = PackageSubdir(platform)
+        self.path = self.recipe_path / f"build_failure.{self.platform}.yaml"
 
-        def load(path: str) -> None:
-            if os.path.getsize(path) == 0:
-                raise OSError("Unable to read build failure record {path}: empty file")
+        def load(path: Path) -> None:
+            if path.stat().st_size == 0:
+                raise OSError(f"Unable to read build failure record {path}: empty file")
             with open(path) as f:
                 yaml = YAML()
                 try:
@@ -53,7 +54,7 @@ class BuildFailureRecord:
             self.inner = {}
 
     def exists(self) -> bool:
-        return os.path.exists(self.path)
+        return self.path.exists()
 
     def set_recipe_sha_to_current_recipe(self) -> None:
         self.recipe_sha = self.get_recipe_sha()
@@ -78,7 +79,7 @@ class BuildFailureRecord:
 
     def get_recipe_sha(self) -> str:
         h = sha256()
-        with open(os.path.join(self.recipe_path, "meta.yaml"), "rb") as f:
+        with open(self.recipe_path / "meta.yaml", "rb") as f:
             h.update(f.read())
             return h.hexdigest()
 
@@ -139,18 +140,18 @@ class BuildFailureRecord:
 
     def remove(self) -> None:
         logger.info(f"Removing build failure record for recipe {self.recipe_path}")
-        os.remove(self.path)
+        self.path.unlink(missing_ok=True)
 
     def commit_and_push_changes(self) -> None:
         """Commit and push any changes, including removal of the record."""
-        utils.run(["git", "add", self.path], redacted_secrets=False)
+        utils.run(["git", "add", str(self.path)], redacted_secrets=False)
         if utils.run(
-            ["git", "diff", "--quiet", "--exit-code", "HEAD", "--", self.path],
+            ["git", "diff", "--quiet", "--exit-code", "HEAD", "--", str(self.path)],
             redacted_secrets=False,
             check=False,
             quiet_failure=True,
         ).returncode:
-            operation = "add" if os.path.exists(self.path) else "remove"
+            operation = "add" if self.path.exists() else "remove"
             utils.run(
                 [
                     "git",
@@ -243,7 +244,7 @@ def collect_build_failure_dataframe(
             BuildFailureRecord.exists,
             [
                 BuildFailureRecord(recipe, platform=platform)
-                for platform in conda.base.constants.PLATFORM_DIRECTORIES
+                for platform in ALL_PACKAGE_SUBDIRS
             ],
         )
 
@@ -278,15 +279,16 @@ def collect_build_failure_dataframe(
             if not has_build_failure(recipe):
                 continue
 
-            components = recipe.split(os.sep)
-            is_version_subdir = len(components) == 3
+            rel_recipe = recipe.relative_to(recipe_folder)
+            components = rel_recipe.parts
+            is_version_subdir = len(components) == 2
 
-            if is_version_subdir and not has_build_failure(os.path.dirname(recipe)):
+            if is_version_subdir and not has_build_failure(recipe.parent):
                 # Skip if the latest recipe does not have a build failure.
                 continue
 
-            package = components[-1] if not is_version_subdir else components[-2]
-            meta = utils.load_meta_fast(recipe)[0]
+            package = components[0]
+            meta = utils.load_meta_fast(str(recipe))[0]
             package_name = meta["package"]["name"]
             descendants = len(nx.descendants(dag, package_name))
 
@@ -296,7 +298,7 @@ def collect_build_failure_dataframe(
             limit = 80  # characters in last column to show before putting the rest in "<details>"
             for rec in recs:
                 failures = utils.format_link(
-                    rec.path, link_fmt, prefix=link_prefix, label=rec.platform
+                    str(rec.path), link_fmt, prefix=link_prefix, label=str(rec.platform)
                 )
                 categories = rec.category
                 reasons = rec.reason
@@ -315,10 +317,9 @@ def collect_build_failure_dataframe(
                     link_fmt,
                     label="show",
                 )
-                recipe = recipe.replace("recipes/", "")
 
                 yield (
-                    recipe,
+                    str(rel_recipe),
                     downloads,
                     descendants,
                     skiplisted,

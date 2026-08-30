@@ -9,6 +9,7 @@ import logging
 import os
 import subprocess as sp
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -429,22 +430,29 @@ def get_worker_subdag(
 
 
 def should_skip_platform(
-    recipe_folder: Path, recipe: Path, platform: PackageSubdir
+    recipe_folder: Path,
+    recipe: Path,
+    platform: PackageSubdir,
+    primary_platforms: Iterable[PackageSubdir] | None = None,
 ) -> bool:
     """
-    Return True if *platform* is a non-primary subdir (``linux-aarch64``,
+    Return True if *platform* is a non-primary subdir (e.g. ``linux-aarch64``,
     ``osx-arm64``, ``linux-riscv64``) and the recipe does not list it in
     ``extra.additional-platforms``.
 
-    The ``linux-64`` and ``osx-64`` subdirs are always built — they are assumed
-    to be universally compatible.  Any other subdir requires explicit opt-in
-    via ``extra.additional-platforms`` in ``meta.yaml``.  Without this gate,
-    every recipe would be attempted on every non-x86_64 builder, wasting time
-    on recipes that have not been verified for that platform.
+    The primary subdirs (by default ``linux-64`` and ``osx-64``) are always built —
+    they are assumed to be universally compatible.  Any other subdir requires
+    explicit opt-in via ``extra.additional-platforms`` in ``meta.yaml``.  Without
+    this gate, every recipe would be attempted on every non-primary builder,
+    wasting time on recipes that have not been verified for that platform.
     """
     recipe_obj = _recipe.Recipe.from_file(recipe_folder, recipe)
-    primary_platforms = {PackageSubdir.LINUX_64, PackageSubdir.OSX_64}
-    additional_platforms = set(ALL_PACKAGE_SUBDIRS) - primary_platforms
+    primary_set = (
+        {PackageSubdir.LINUX_64, PackageSubdir.OSX_64}
+        if primary_platforms is None
+        else set(primary_platforms)
+    )
+    additional_platforms = set(ALL_PACKAGE_SUBDIRS) - primary_set
     return (
         platform in additional_platforms
         and platform not in recipe_obj.additional_platforms
@@ -587,7 +595,12 @@ def build_recipes(
             if target_platform is not None
             else utils.RepoData().native_subdir()
         )
-        if not force and should_skip_platform(recipe_folder, recipe, platform):
+        if not force and should_skip_platform(
+            recipe_folder,
+            recipe,
+            platform,
+            primary_platforms=config.get("primary_platforms"),
+        ):
             logger.info(
                 "BUILD SKIP: skipping %s for additional platform %s",
                 recipe,

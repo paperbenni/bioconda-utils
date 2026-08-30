@@ -1221,6 +1221,7 @@ def normalize_config(config: dict[str, Any]) -> Config:
             "channels": ["conda-forge", "bioconda"],
             "requirements": None,
             "upload_channel": "bioconda",
+            "primary_platforms": [PackageSubdir.LINUX_64, PackageSubdir.OSX_64],
         }
     )
     default_config.update(config)
@@ -1228,6 +1229,10 @@ def normalize_config(config: dict[str, Any]) -> Config:
         default_config["blacklists"] = list(get_list("blacklists"))
     if "channels" in config:
         default_config["channels"] = list(get_list("channels"))
+    if "primary_platforms" in config:
+        default_config["primary_platforms"] = [
+            PackageSubdir(p) for p in get_list("primary_platforms")
+        ]
 
     return default_config
 

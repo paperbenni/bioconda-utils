@@ -34,25 +34,6 @@ def load_pixi_toml():
         return tomllib.load(f)
 
 
-def is_galaxy_dev_mode(data):
-    """Return True when pixi.toml carries editable local Galaxy pypi overrides.
-
-    ``just install-galaxy-dev`` replaces the conda ``galaxy-tool-util``
-    dependency with editable installs from a sibling Galaxy checkout, which
-    intentionally mutates ``[dependencies]``. The shipped requirements file
-    must keep its conda ``galaxy-tool-util`` entry (it feeds docker builds via
-    ``conda install --file``), so in this local-only state we skip the
-    staleness check instead of regenerating.
-    """
-    pypi_deps = data.get("pypi-dependencies")
-    if not isinstance(pypi_deps, dict):
-        return False
-    return any(
-        pkg.startswith("galaxy-") and isinstance(spec, dict) and spec.get("editable")
-        for pkg, spec in pypi_deps.items()
-    )
-
-
 def read_pixi_deps():
     data = load_pixi_toml()
     deps = data.get("dependencies")
@@ -134,15 +115,6 @@ def parse_args():
 
 def main():
     args = parse_args()
-    if args.check:
-        data = load_pixi_toml()
-        if is_galaxy_dev_mode(data):
-            print(
-                f"{REQUIREMENTS_TXT} check skipped: "
-                "galaxy dev overrides are active (run `just restore-galaxy-dev` "
-                "to resume strict checks)"
-            )
-            return
     content = generate()
     if args.check:
         existing = REQUIREMENTS_TXT.read_text()

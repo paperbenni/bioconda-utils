@@ -56,7 +56,6 @@ from pathlib import Path
 from shlex import quote
 from typing import Protocol
 
-from conda import exports as conda_exports
 from packaging.version import Version
 
 from . import utils
@@ -64,7 +63,10 @@ from ._types import (
     ALL_PACKAGE_SUBDIRS,
     ContainerPlatform,
     PkgBuildRef,
+    Subdir,
+    container_platform_to_package_subdir,
     local_mulled_image_ref,
+    native_container_platform,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,6 +77,26 @@ LOCAL_CHANNEL_SUBDIRS = tuple(
 LOCAL_CHANNEL_MKDIRS = "\n  ".join(
     f'mkdir -p "${{local_channel}}"/{subdir}' for subdir in LOCAL_CHANNEL_SUBDIRS
 )
+LOCAL_CHANNEL_SUBDIR_ARGS = " ".join(quote(subdir) for subdir in LOCAL_CHANNEL_SUBDIRS)
+
+
+PUBLISH_BUILT_PACKAGES_TEMPLATE = r"""
+# Publish only packages produced by this successful conda-build invocation.
+# conda-build chooses each output's channel subdirectory, which matters for
+# recipes that mix architecture-specific and noarch outputs.
+for subdir in {local_channel_subdirs}; do
+  output_subdir="${{build_output}}/${{subdir}}"
+  test -d "${{output_subdir}}" || continue
+  while IFS= read -r -d '' package; do
+    destination='{self.container_staging}'/"${{subdir}}/${{package##*/}}"
+    cp -- "${{package}}" "${{destination}}"
+    chown {self.user_info[uid]}:{self.user_info[gid]} "${{destination}}"
+  done < <(
+    find "${{output_subdir}}" -maxdepth 1 -type f \
+      \( -name '*.tar.bz2' -o -name '*.conda' \) -print0
+  )
+done
+"""
 
 
 class CondaBuildConfigFile(Protocol):
@@ -118,22 +140,19 @@ conda config --add channels file://{self.container_staging} 2> >(
 # Pass on conda_pkg_format ("2" for .conda instead of .tar.bz2) from host's conda-build config.
 #test -n '{self.conda_pkg_format}' && conda config --set conda_build.pkg_format '{self.conda_pkg_format}'
 
+# Build into a clean, container-local output channel. Keeping this separate
+# from the mounted staging channel ensures that a failed multi-output build
+# cannot publish only some of its packages to the host.
+build_output=$(mktemp -d /opt/conda/bioconda-output.XXXXXX)
+
 # The actual building...
 # we explicitly point to the meta.yaml, in order to keep
 # conda-build from building all subdirectories
-conda-build -c file://{self.container_staging} {self.conda_build_args} {self.container_recipe}/meta.yaml 2>&1
+conda-build -c file://{self.container_staging} {self.conda_build_args} \
+  --output-folder "${{build_output}}" {self.container_recipe}/meta.yaml 2>&1
 
-# copy all built packages to the staging area
-find /opt/conda/conda-bld \
-  -name src_cache -prune -o \
-  -type f \( -name '*.tar.bz2' -o -name '*.conda' \) -print0 |
-  xargs -0 -- cp -t '{self.container_staging}/{arch}' --
-#While technically better, this is slower and more prone to breaking
-#cp `conda-build {self.conda_build_args} {self.container_recipe}/meta.yaml --output | grep -e '\.tar\.bz2$' -e '\.conda$')` {self.container_staging}/{arch}
+{publish_built_packages}
 conda index {self.container_staging}
-# Ensure permissions are correct on the host.
-HOST_USER={self.user_info[uid]}
-chown $HOST_USER:$HOST_USER {self.container_staging}/{arch}/*
 """
 
 # ----------------------------------------------------------------------------
@@ -351,6 +370,18 @@ class RecipeBuilder:
         dst_basename = f"conda_build_config_{i}_{config_file.arg}_{src_basename}"
         return os.path.join(staging_prefix, dst_basename)
 
+    def _output_subdir(self, noarch: bool) -> Subdir:
+        """Return the legacy ``{arch}`` template value for this build.
+
+        The default build script preserves the subdirectory selected by
+        conda-build for every output. Custom templates may still use
+        ``{arch}``, so keep it accurate for cross-platform builds.
+        """
+        if noarch:
+            return "noarch"
+        target_platform = self.target_platform or native_container_platform()
+        return container_platform_to_package_subdir(target_platform)
+
     def __del__(self) -> None:
         self.cleanup()
 
@@ -489,7 +520,9 @@ class RecipeBuilder:
             Environmental variables
 
         noarch: bool
-            Has to be set to true if this is a noarch build
+            Whether to expose ``noarch`` through the legacy ``{arch}``
+            custom-template placeholder. The default template preserves the
+            subdirectory conda-build selects independently for every output.
 
         Note that the binds are set up automatically to match the expectations
         of the build script, and will use the currently-configured
@@ -508,12 +541,18 @@ class RecipeBuilder:
 
         # Write build script to tempfile
         build_dir = os.path.realpath(tempfile.mkdtemp())
-        # conda_exports.subdir is {platform}-{arch} like: 'linux-64' 'linux-aarch64'
+        publish_built_packages = PUBLISH_BUILT_PACKAGES_TEMPLATE.format_map(
+            {
+                "self": self,
+                "local_channel_subdirs": LOCAL_CHANNEL_SUBDIR_ARGS,
+            }
+        )
         script = self.build_script_template.format_map(
             {
                 "self": self,
-                "arch": "noarch" if noarch else conda_exports.subdir,
+                "arch": self._output_subdir(noarch),
                 "local_channel_mkdirs": LOCAL_CHANNEL_MKDIRS,
+                "publish_built_packages": publish_built_packages,
             }
         )
         with open(os.path.join(build_dir, "build_script.bash"), "w") as fout:

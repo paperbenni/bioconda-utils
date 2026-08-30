@@ -33,16 +33,24 @@ def test_osx_package_subdir_has_no_container_platform():
 
 
 def test_docker_build_script_creates_supported_linux_channel_subdirs():
+    builder = Mock(
+        container_staging="/opt/host-conda-bld",
+        conda_build_args="",
+        container_recipe="/opt/recipe",
+        user_info={"uid": 1000, "gid": 100},
+    )
+    publish_built_packages = docker_utils.PUBLISH_BUILT_PACKAGES_TEMPLATE.format_map(
+        {
+            "self": builder,
+            "local_channel_subdirs": docker_utils.LOCAL_CHANNEL_SUBDIR_ARGS,
+        }
+    )
     script = docker_utils.BUILD_SCRIPT_TEMPLATE.format_map(
         {
-            "self": Mock(
-                container_staging="/opt/host-conda-bld",
-                conda_build_args="",
-                container_recipe="/opt/recipe",
-                user_info={"uid": 1000},
-            ),
+            "self": builder,
             "arch": PackageSubdir.LINUX_RISCV64,
             "local_channel_mkdirs": docker_utils.LOCAL_CHANNEL_MKDIRS,
+            "publish_built_packages": publish_built_packages,
         }
     )
 
@@ -50,6 +58,75 @@ def test_docker_build_script_creates_supported_linux_channel_subdirs():
     assert 'mkdir -p "${local_channel}"/linux-aarch64' in script
     assert 'mkdir -p "${local_channel}"/linux-riscv64' in script
     assert 'mkdir -p "${local_channel}"/noarch' in script
+    assert "build_output=$(mktemp -d /opt/conda/bioconda-output.XXXXXX)" in script
+    assert '--output-folder "${build_output}"' in script
+    sp.run(["bash", "-n"], input=script, text=True, check=True)
+
+
+def test_publish_built_packages_preserves_channel_subdirs(tmp_path):
+    build_output = tmp_path / "build-output"
+    staging = tmp_path / "staging"
+    for subdir in docker_utils.LOCAL_CHANNEL_SUBDIRS:
+        (build_output / subdir).mkdir(parents=True)
+        (staging / subdir).mkdir(parents=True)
+
+    arm_package = build_output / "linux-aarch64" / "tool-1.0-0.conda"
+    noarch_package = build_output / "noarch" / "tool-data-1.0-0.tar.bz2"
+    nested_package = build_output / "linux-aarch64" / "work" / "nested.conda"
+    unsupported_package = build_output / "osx-arm64" / "unexpected.conda"
+    arm_package.write_bytes(b"arm")
+    noarch_package.write_bytes(b"noarch")
+    nested_package.parent.mkdir()
+    nested_package.write_bytes(b"nested")
+    unsupported_package.parent.mkdir()
+    unsupported_package.write_bytes(b"osx")
+    (build_output / "linux-aarch64" / "repodata.json").write_text("{}")
+
+    builder = Mock(
+        container_staging=str(staging),
+        user_info={"uid": os.getuid(), "gid": os.getgid()},
+    )
+    publish_script = docker_utils.PUBLISH_BUILT_PACKAGES_TEMPLATE.format_map(
+        {
+            "self": builder,
+            "local_channel_subdirs": docker_utils.LOCAL_CHANNEL_SUBDIR_ARGS,
+        }
+    )
+    sp.run(
+        ["bash", "-c", f'build_output="$1"\n{publish_script}', "bash", build_output],
+        check=True,
+    )
+
+    assert (staging / "linux-aarch64" / arm_package.name).read_bytes() == b"arm"
+    assert (staging / "noarch" / noarch_package.name).read_bytes() == b"noarch"
+    assert not (staging / "linux-aarch64" / nested_package.name).exists()
+    assert not (staging / "osx-arm64").exists()
+    assert not (staging / "linux-aarch64" / "repodata.json").exists()
+
+
+def test_recipe_builder_legacy_arch_uses_target_platform():
+    builder = Mock(target_platform=ContainerPlatform.LINUX_ARM64)
+
+    assert (
+        docker_utils.RecipeBuilder._output_subdir(builder, noarch=False)
+        == PackageSubdir.LINUX_AARCH64
+    )
+    assert docker_utils.RecipeBuilder._output_subdir(builder, noarch=True) == "noarch"
+
+
+def test_publish_built_packages_uses_host_uid_and_gid():
+    builder = Mock(
+        container_staging="/opt/host-conda-bld",
+        user_info={"uid": 123, "gid": 456},
+    )
+    script = docker_utils.PUBLISH_BUILT_PACKAGES_TEMPLATE.format_map(
+        {
+            "self": builder,
+            "local_channel_subdirs": docker_utils.LOCAL_CHANNEL_SUBDIR_ARGS,
+        }
+    )
+
+    assert 'chown 123:456 "${destination}"' in script
 
 
 def test_docker_platform_tag_suffix_matches_mulled_build_convention(monkeypatch):

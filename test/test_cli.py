@@ -74,6 +74,8 @@ def test_build_uses_normalized_option_names():
     assert "--no-presolved-mulled-test" not in option_names
     assert "--container-upload-target" in option_names
     assert "--mulled-upload-target" not in option_names
+    assert "--image-records-dir" in option_names
+    assert "--mulled-upload-records" not in option_names
     assert "--quay-upload-target" not in option_names
     assert "--testonly" not in option_names
     assert "--prelint" not in option_names
@@ -94,6 +96,8 @@ def test_platform_options_have_one_source_of_truth_per_command():
     assert "--container-upload-target" in build_options
     assert "--mulled-upload-target" not in build_options
     assert "--quay-upload-target" not in build_options
+    assert "--image-records-dir" in build_options
+    assert "--mulled-upload-records" not in build_options
 
     assert "--platform" in merged_pr_options
     assert "--package-platform" not in merged_pr_options
@@ -101,6 +105,8 @@ def test_platform_options_have_one_source_of_truth_per_command():
     assert "--container-upload-target" in merged_pr_options
     assert "--quay-upload-target" not in merged_pr_options
     assert "--mulled-upload-target" not in merged_pr_options
+    assert "--image-records-dir" in merged_pr_options
+    assert "--mulled-upload-records" not in merged_pr_options
 
     create_mulled_manifests_options = {
         option

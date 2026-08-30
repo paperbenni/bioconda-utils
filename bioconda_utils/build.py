@@ -486,7 +486,7 @@ def build_recipes(
     presolved_mulled_build_and_test: bool = True,
     fast_resolve: bool = True,
     target_platform: ContainerPlatform | None = None,
-    mulled_upload_records: Path | None = None,
+    image_records_dir: Path | None = None,
     use_existing_auth: bool = False,
 ) -> bool:
     """
@@ -710,8 +710,8 @@ def build_recipes(
                             img.target_platform,
                             use_existing_auth=use_existing_auth,
                         )
-                        if mulled_upload_records is not None:
-                            write_image_record(mulled_upload_records, record)
+                        if image_records_dir is not None:
+                            write_image_record(image_records_dir, record)
                         docker_utils.purgeImage(img.pkg_ref, img.target_platform)
 
         # remove traces of the build

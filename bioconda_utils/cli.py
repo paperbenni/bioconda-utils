@@ -85,7 +85,7 @@ def _parse_quay_upload_target(value: str | None) -> QuayUploadTarget | None:
         raise typer.BadParameter(str(exc)) from exc
 
 
-def _resolve_mulled_upload_records(
+def _resolve_image_records_dir(
     records: Path | None, upload_target: QuayUploadTarget | None
 ) -> Path | None:
     if records:
@@ -216,11 +216,17 @@ UseExistingAuthOpt = Annotated[
         help="Use existing Docker or skopeo registry authentication when Quay credentials are unset.",
     ),
 ]
-MulledUploadRecordsOpt = Annotated[
+ImageRecordsDirOpt = Annotated[
     Path | None,
     typer.Option(
-        "--mulled-upload-records",
-        help="Append uploaded mulled image records as JSONL for manifest publication.",
+        "--image-records-dir",
+        metavar="DIR",
+        help=(
+            "DIR for one JSONL image record per uploaded image; consumed by "
+            "the create-mulled-manifests command. Defaults to "
+            "~/.local/share/bioconda-utils/mulled-records/ when "
+            "--container-upload-target is set."
+        ),
     ),
 ]
 
@@ -502,7 +508,7 @@ def build(
             help="Disable fast resolve: always run the full finalized conda solver on the host, even when building with Docker. Useful for debugging build string mismatches.",
         ),
     ] = False,
-    mulled_upload_records: MulledUploadRecordsOpt = None,
+    image_records_dir: ImageRecordsDirOpt = None,
     use_existing_auth: UseExistingAuthOpt = False,
     exclude: Annotated[
         list[str] | None,
@@ -524,8 +530,8 @@ def build(
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
     target_platform = _container_platform_for_build(platform, docker)
     parsed_upload_target = _parse_quay_upload_target(container_upload_target)
-    mulled_upload_records = _resolve_mulled_upload_records(
-        mulled_upload_records, parsed_upload_target
+    image_records_dir = _resolve_image_records_dir(
+        image_records_dir, parsed_upload_target
     )
     package_patterns: PackagePatterns = packages or ["*"]
     parsed_git_range = _parse_git_range_if_needed(git_range)
@@ -598,7 +604,7 @@ def build(
         presolved_mulled_build_and_test=presolved_mulled_build_and_test,
         fast_resolve=not no_fast_resolve,
         target_platform=target_platform,
-        mulled_upload_records=mulled_upload_records,
+        image_records_dir=image_records_dir,
         use_existing_auth=use_existing_auth,
     )
     sys.exit(0 if success else 1)
@@ -1521,7 +1527,7 @@ def handle_merged_pr(
             help="Conda package subdirectory to upload from PR artifacts (for example, linux-aarch64). Defaults to the native subdirectory.",
         ),
     ] = None,
-    mulled_upload_records: MulledUploadRecordsOpt = None,
+    image_records_dir: ImageRecordsDirOpt = None,
     use_existing_auth: UseExistingAuthOpt = False,
     loglevel: LoglevelOpt = "info",
     logfile: LogfileOpt = None,
@@ -1533,8 +1539,8 @@ def handle_merged_pr(
     label = os.getenv("BIOCONDA_LABEL", None) or None
     parsed_git_range = _parse_git_range(git_range)
     parsed_upload_target = _parse_quay_upload_target(container_upload_target)
-    mulled_upload_records = _resolve_mulled_upload_records(
-        mulled_upload_records, parsed_upload_target
+    image_records_dir = _resolve_image_records_dir(
+        image_records_dir, parsed_upload_target
     )
     res = upload_pr_artifacts(
         repo,
@@ -1544,7 +1550,7 @@ def handle_merged_pr(
         label=label,
         artifact_source=artifact_source,
         package_platform=package_platform,
-        mulled_upload_records=mulled_upload_records,
+        image_records_dir=image_records_dir,
         use_existing_auth=use_existing_auth,
     )
     if res == UploadResult.NO_ARTIFACTS and fallback == "build":
@@ -1573,7 +1579,7 @@ def handle_merged_pr(
             anaconda_upload=not dry_run,
             container_upload_target=parsed_upload_target if not dry_run else None,
             mulled_build_and_test=True,
-            mulled_upload_records=mulled_upload_records,
+            image_records_dir=image_records_dir,
             use_existing_auth=use_existing_auth,
         )
     else:

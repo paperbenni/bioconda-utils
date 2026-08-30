@@ -154,7 +154,7 @@ def _upload_mulled_images(
     mulled_upload_target: QuayUploadTarget,
     dryrun: bool,
     label: str | None,
-    mulled_upload_records: Path | None,
+    image_records_dir: Path | None,
     use_existing_auth: bool,
 ) -> list[bool]:
     """Upload matching mulled image archives and report per-image success."""
@@ -210,8 +210,8 @@ def _upload_mulled_images(
                 use_existing_auth=use_existing_auth,
             )
             success.append(True)
-            if mulled_upload_records is not None:
-                write_image_record(mulled_upload_records, record)
+            if image_records_dir is not None:
+                write_image_record(image_records_dir, record)
     if image_seen and not image_matched:
         logger.error(
             "Found mulled image artifacts, but none matched %s.",
@@ -236,7 +236,7 @@ def upload_pr_artifacts(
     label: str | None = None,
     artifact_source: ArtifactSource = "azure",
     package_platform: PackageSubdir | None = None,
-    mulled_upload_records: Path | None = None,
+    image_records_dir: Path | None = None,
     use_existing_auth: bool = False,
 ) -> UploadResult:
     """Upload package and image artifacts from the PR associated with git_sha."""
@@ -298,7 +298,7 @@ def upload_pr_artifacts(
                         mulled_upload_target=mulled_upload_target,
                         dryrun=dryrun,
                         label=label,
-                        mulled_upload_records=mulled_upload_records,
+                        image_records_dir=image_records_dir,
                         use_existing_auth=use_existing_auth,
                     )
                 )

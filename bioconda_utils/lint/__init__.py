@@ -611,7 +611,7 @@ class Linter:
         """Run the linter on a single recipe
 
         Args:
-          recipe_name: Mames of recipe to lint
+          recipe_name: Name of recipe to lint
           fix: Whether checks should attempt to fix detected issues
 
         Returns:

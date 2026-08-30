@@ -12,6 +12,7 @@ from collections.abc import Set as AbstractSet
 #        Re-implement it here or ask upstream to export that functionality.
 from conda_build.metadata import MetaData, trim_build_only_deps
 
+from ._types import PkgBuildRef
 from .recipe import Recipe, RecipeError
 from .utils import RepoData
 
@@ -254,21 +255,24 @@ def will_build_only_missing(metas: list[MetaData]) -> bool:
       True if no divergent build strings exist in repodata
     """
     builds = {(meta.name(), meta.version(), meta.build_number()) for meta in metas}
-    existing_builds = set()
+    existing_builds: set[PkgBuildRef] = set()
     for name, version, build_number in builds:
         existing_builds.update(
-            map(
-                tuple,
-                RepoData().get_package_data(
-                    ["name", "version", "build"],
-                    name=name,
-                    version=version,
-                    build_number=build_number,
-                    native=True,
-                ),
-            ),
+            PkgBuildRef(name=n, version=v, build_string=b)
+            for n, v, b in RepoData().get_package_data(
+                ["name", "version", "build"],
+                name=name,
+                version=version,
+                build_number=build_number,
+                native=True,
+            )
         )
-    new_builds = {(meta.name(), meta.version(), meta.build_id()) for meta in metas}
+    new_builds = {
+        PkgBuildRef(
+            name=meta.name(), version=meta.version(), build_string=meta.build_id()
+        )
+        for meta in metas
+    }
     return new_builds.issuperset(existing_builds)
 
 

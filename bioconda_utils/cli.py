@@ -609,10 +609,10 @@ def dag(
     recipe_folder: RecipeFolderArg = Path("recipes/"),
     config: ConfigArg = Path("config.yml"),
     packages: PackagesOpt = None,
-    format: Annotated[
+    output_format: Annotated[
         Literal["gml", "dot", "txt"],
         typer.Option(
-            "--format",
+            "--output-format",
             help='Output format. "gml" and "dot" serialize the graph for visualization tools. "txt" lists recipe paths in dependency-first order, grouped by disconnected components. Disconnected packages are listed together at the end unless --hide-singletons is used.',
         ),
     ] = "gml",
@@ -641,11 +641,11 @@ def dag(
     )
     if hide_singletons:
         dag.remove_nodes_from(list(nx.isolates(dag)))
-    if format == "gml":
+    if output_format == "gml":
         nx.write_gml(dag, sys.stdout.buffer)
-    elif format == "dot":
+    elif output_format == "dot":
         write_dot(dag, sys.stdout)
-    elif format == "txt":
+    elif output_format == "txt":
         subdags: list[list[str]] = sorted(
             map(sorted, nx.connected_components(dag.to_undirected()))
         )

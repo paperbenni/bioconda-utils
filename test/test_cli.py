@@ -119,6 +119,18 @@ def test_platform_options_have_one_source_of_truth_per_command():
     assert "--platform" in annotate_options
     assert "--platforms" not in annotate_options
 
+    dag_options = {option for param in commands["dag"].params for option in param.opts}
+    assert "--output-format" in dag_options
+    assert "--format" not in dag_options
+
+    list_failures_options = {
+        option
+        for param in commands["list-build-failures"].params
+        for option in param.opts
+    }
+    assert "--output-format" in list_failures_options
+    assert "--format" not in list_failures_options
+
 
 def test_handle_merged_pr_requires_repository_and_git_range():
     command = cast(Any, get_command(cli.app)).commands["handle-merged-pr"]
@@ -129,10 +141,10 @@ def test_handle_merged_pr_requires_repository_and_git_range():
 
 
 def test_choices_are_enforced_before_command_execution():
-    result = runner.invoke(cli.app, ["dag", "--format", "invalid"])
+    result = runner.invoke(cli.app, ["dag", "--output-format", "invalid"])
 
     assert result.exit_code == 2
-    assert "Invalid value for '--format'" in result.output
+    assert "Invalid value for '--output-format'" in result.output
 
 
 def test_dag_help_describes_dependency_edges():
@@ -161,7 +173,7 @@ def test_dag_hides_singletons(monkeypatch, tmp_path):
             "dag",
             str(recipe_folder),
             str(config),
-            "--format",
+            "--output-format",
             "txt",
             "--hide-singletons",
         ],

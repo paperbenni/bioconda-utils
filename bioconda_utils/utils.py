@@ -21,6 +21,7 @@ import sys
 import warnings
 from collections import Counter, defaultdict, deque, namedtuple
 from collections.abc import Collection, Iterable, Iterator, Sequence
+from dataclasses import dataclass
 from functools import partial
 from importlib.resources import as_file, files
 from itertools import chain, product, zip_longest
@@ -28,7 +29,7 @@ from multiprocessing import Pool
 from multiprocessing.pool import ThreadPool
 from pathlib import Path, PurePath
 from threading import Event, Thread
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, TypeAlias, cast
 
 import aiofiles
 import aiohttp
@@ -74,6 +75,14 @@ cast(Any, conda.gateways.logging).initialize_logging = lambda: None
 logger = logging.getLogger(__name__)
 
 disk_cache = diskcache.Cache(platformdirs.user_cache_dir("bioconda-utils"))
+
+RepoDataKey: TypeAlias = tuple[str, Subdir]
+
+
+@dataclass
+class _CachedRepoData:
+    dataframe: pd.DataFrame
+    fetched_at: datetime.datetime
 
 
 class TqdmHandler(logging.StreamHandler):
@@ -1456,8 +1465,7 @@ class RepoData:
     cache_file = None
     _df = None
     _df_ts = None
-    _subdir_dfs: ClassVar[dict[tuple[tuple[str, ...], str], pd.DataFrame]] = {}
-    _subdir_df_ts: ClassVar[dict[tuple[tuple[str, ...], str], datetime.datetime]] = {}
+    _repository_cache: ClassVar[dict[RepoDataKey, _CachedRepoData]] = {}
 
     #: default lifetime for repodata cache
     cache_timeout = 60 * 60 * 8
@@ -1502,13 +1510,18 @@ class RepoData:
         change the structure in which the data is held.
         """
         if self._df_ts is not None:
-            seconds = (datetime.datetime.now(datetime.UTC) - self._df_ts).seconds
+            seconds = (
+                datetime.datetime.now(datetime.UTC) - self._df_ts
+            ).total_seconds()
         else:
             seconds = 0
 
         if self._df is None or seconds > self.cache_timeout:
+            self._df = None
+            self._df_ts = None
             self._df = self._load_channel_dataframe_cached()
             self._df_ts = datetime.datetime.now(datetime.UTC)
+            self._repository_cache.clear()
         return self._df
 
     def _make_repodata_url(self, channel, subdir: Subdir):
@@ -1530,22 +1543,30 @@ class RepoData:
             ts = datetime.datetime.fromtimestamp(
                 os.path.getmtime(self.cache_file), datetime.UTC
             )
-            seconds = (datetime.datetime.now(datetime.UTC) - ts).seconds
+            seconds = (datetime.datetime.now(datetime.UTC) - ts).total_seconds()
             if seconds <= self.cache_timeout:
                 logger.info("Loading repodata from cache %s", self.cache_file)
                 return pd.read_pickle(self.cache_file)
             else:
                 logger.info("Repodata cache file too old. Reloading")
 
-        res = self._load_channel_dataframe()
+        if self.cache_file is None:
+            res = self._get_repository_dataframe(self.channels, self.platforms)
+        else:
+            res = self._load_channel_dataframe()
 
         if self.cache_file is not None:
             res.to_pickle(self.cache_file)
         return res
 
-    def _load_channel_dataframe(self, subdirs: Iterable[Subdir] | None = None):
-        selected_subdirs = tuple(self.platforms if subdirs is None else subdirs)
-        repos = list(product(self.channels, selected_subdirs))
+    def _load_channel_dataframe(
+        self, repositories: Iterable[tuple[str, Subdir]] | None = None
+    ):
+        repos = list(
+            product(self.channels, self.platforms)
+            if repositories is None
+            else repositories
+        )
         urls = [self._make_repodata_url(c, p) for c, p in repos]
         descs = [f"{c}/{p}" for c, p in repos]
 
@@ -1583,30 +1604,43 @@ class RepoData:
 
         return res
 
-    def _get_subdir_dataframe(self, subdirs: Iterable[str]) -> pd.DataFrame:
-        """Load and cache only the requested repository subdirectories."""
-        requested = tuple(dict.fromkeys(subdirs))
+    def _get_repository_dataframe(
+        self, channels: Iterable[str], subdirs: Iterable[Subdir]
+    ) -> pd.DataFrame:
+        """Load and cache only the requested channel/subdirectory pairs."""
         if self._df is not None or self.cache_file is not None:
             return self.df
 
+        configured_channels = set(self.channels)
+        requested_channels = tuple(
+            channel
+            for channel in dict.fromkeys(channels)
+            if channel in configured_channels
+        )
+        requested_subdirs = tuple(dict.fromkeys(subdirs))
+        repositories = tuple(product(requested_channels, requested_subdirs))
         now = datetime.datetime.now(datetime.UTC)
-        channels = tuple(self.channels)
         missing = [
-            subdir
-            for subdir in requested
-            if (channels, subdir) not in self._subdir_dfs
-            or (now - self._subdir_df_ts[channels, subdir]).total_seconds()
+            repository
+            for repository in repositories
+            if repository not in self._repository_cache
+            or (now - self._repository_cache[repository].fetched_at).total_seconds()
             > self.cache_timeout
         ]
         if missing:
-            loaded = self._load_channel_dataframe(cast(Iterable[Subdir], missing))
-            for subdir in missing:
-                self._subdir_dfs[channels, subdir] = loaded[
-                    loaded["subdir"] == subdir
-                ].copy()
-                self._subdir_df_ts[channels, subdir] = now
+            loaded = self._load_channel_dataframe(missing)
+            for channel, subdir in missing:
+                repository = (channel, subdir)
+                self._repository_cache[repository] = _CachedRepoData(
+                    dataframe=loaded[
+                        (loaded["channel"] == channel) & (loaded["subdir"] == subdir)
+                    ],
+                    fetched_at=now,
+                )
 
-        frames = [self._subdir_dfs[channels, subdir] for subdir in requested]
+        frames = [
+            self._repository_cache[repository].dataframe for repository in repositories
+        ]
         return pd.concat(frames) if frames else pd.DataFrame(columns=self.columns)
 
     @staticmethod
@@ -1659,13 +1693,23 @@ class RepoData:
         if version is not None:
             version = str(version)
 
-        if platform is None:
-            df = self.df
+        if isinstance(channels, str):
+            requested_channels = [channels]
+        elif channels is None:
+            requested_channels = self.channels
         else:
-            requested_subdirs = (
-                platform if isinstance(platform, (list, tuple)) else [platform]
-            )
-            df = self._get_subdir_dataframe(requested_subdirs)
+            requested_channels = channels
+
+        if isinstance(platform, str):
+            requested_subdirs = [cast(Subdir, platform)]
+        elif platform is None:
+            requested_subdirs = self.platforms
+        else:
+            requested_subdirs = [cast(Subdir, subdir) for subdir in platform]
+
+        df = self._get_repository_dataframe(requested_channels, requested_subdirs)
+        channel_filter = requested_channels if channels is not None else None
+        platform_filter = requested_subdirs if platform is not None else None
         # We iteratively drill down here, starting with the (probably)
         # most specific columns. Filtering this way on a large data frame
         # is much faster than executing the comparisons for all values
@@ -1674,8 +1718,8 @@ class RepoData:
             ("name", name),  # thousands of different values
             ("build", build),  # build string should vary a lot
             ("version", version),  # still pretty good variety
-            ("channel", channels),  # 3 values
-            ("platform", platform),  # 3 values
+            ("channel", channel_filter),  # 3 values
+            ("platform", platform_filter),  # 3 values
             ("build_number", build_number),  # most values 0
         ):
             if val is None:

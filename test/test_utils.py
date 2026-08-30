@@ -1,4 +1,5 @@
 import contextlib
+import datetime
 import importlib
 import logging
 import os
@@ -1093,31 +1094,34 @@ def test_load_platform_metas_preserves_complete_target_platform(
     assert Path(api.get_output_file_paths(meta)[0]).parent.name == expected_subdir
 
 
-def test_repodata_loads_only_requested_subdirs(monkeypatch):
-    monkeypatch.setattr(utils.RepoData, "config", {"channels": ["bioconda"]})
+def test_repodata_loads_and_reuses_only_requested_repositories(monkeypatch):
+    monkeypatch.setattr(
+        utils.RepoData, "config", {"channels": ["bioconda", "conda-forge"]}
+    )
     repodata = utils.RepoData()
     monkeypatch.setattr(repodata, "_df", None)
     monkeypatch.setattr(repodata, "cache_file", None)
-    monkeypatch.setattr(repodata, "_subdir_dfs", {})
-    monkeypatch.setattr(repodata, "_subdir_df_ts", {})
-    loaded_subdirs = []
+    monkeypatch.setattr(repodata, "_repository_cache", {})
+    monkeypatch.setattr(repodata, "platforms", [PackageSubdir.LINUX_AARCH64, "noarch"])
+    loaded_repositories = []
 
-    def load(subdirs=None):
-        selected = tuple(subdirs or repodata.platforms)
-        loaded_subdirs.append(selected)
+    def load(repositories=None):
+        assert repositories is not None
+        selected = tuple(repositories)
+        loaded_repositories.append(selected)
         return pd.DataFrame(
             [
                 {
-                    "name": f"package-{subdir}",
+                    "name": f"package-{channel}-{subdir}",
                     "version": "1",
                     "build": "0",
                     "build_number": 0,
                     "depends": [],
-                    "channel": "bioconda",
+                    "channel": channel,
                     "platform": subdir,
                     "subdir": subdir,
                 }
-                for subdir in selected
+                for channel, subdir in selected
             ],
             columns=utils.RepoData.columns,
         )
@@ -1126,12 +1130,131 @@ def test_repodata_loads_only_requested_subdirs(monkeypatch):
 
     assert set(
         repodata.get_package_data(
-            "name", platform=[PackageSubdir.LINUX_AARCH64, "noarch"]
+            "name",
+            channels="bioconda",
+            platform=[PackageSubdir.LINUX_AARCH64, "noarch"],
         )
-    ) == {"package-linux-aarch64", "package-noarch"}
-    repodata.get_package_data("name", platform=[PackageSubdir.LINUX_AARCH64])
+    ) == {
+        "package-bioconda-linux-aarch64",
+        "package-bioconda-noarch",
+    }
+    assert set(
+        repodata.get_package_data(
+            "name",
+            channels=["bioconda", "conda-forge"],
+            platform=[PackageSubdir.LINUX_AARCH64],
+        )
+    ) == {
+        "package-bioconda-linux-aarch64",
+        "package-conda-forge-linux-aarch64",
+    }
+    assert not repodata.get_package_data(
+        channels="unconfigured", platform=PackageSubdir.LINUX_AARCH64
+    )
+    assert set(repodata.df["name"]) == {
+        "package-bioconda-linux-aarch64",
+        "package-bioconda-noarch",
+        "package-conda-forge-linux-aarch64",
+        "package-conda-forge-noarch",
+    }
+    assert repodata._repository_cache == {}
 
-    assert loaded_subdirs == [(PackageSubdir.LINUX_AARCH64, "noarch")]
+    assert loaded_repositories == [
+        (
+            ("bioconda", PackageSubdir.LINUX_AARCH64),
+            ("bioconda", "noarch"),
+        ),
+        (("conda-forge", PackageSubdir.LINUX_AARCH64),),
+        (("conda-forge", "noarch"),),
+    ]
+
+
+def _repodata_dataframe(name):
+    return pd.DataFrame(
+        [
+            {
+                "name": name,
+                "version": "1",
+                "build": "0",
+                "build_number": 0,
+                "depends": [],
+                "channel": "bioconda",
+                "platform": PackageSubdir.LINUX_AARCH64,
+                "subdir": PackageSubdir.LINUX_AARCH64,
+            }
+        ],
+        columns=utils.RepoData.columns,
+    )
+
+
+def test_repodata_refreshes_expired_repository(monkeypatch):
+    monkeypatch.setattr(utils.RepoData, "config", {"channels": ["bioconda"]})
+    repodata = utils.RepoData()
+    repository = ("bioconda", PackageSubdir.LINUX_AARCH64)
+    expired_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=30)
+    monkeypatch.setattr(repodata, "_df", None)
+    monkeypatch.setattr(repodata, "cache_file", None)
+    monkeypatch.setattr(
+        repodata,
+        "_repository_cache",
+        {repository: utils._CachedRepoData(_repodata_dataframe("old"), expired_at)},
+    )
+    loaded_repositories = []
+
+    def load(repositories=None):
+        loaded_repositories.append(tuple(repositories or ()))
+        return _repodata_dataframe("fresh")
+
+    monkeypatch.setattr(repodata, "_load_channel_dataframe", load)
+
+    assert repodata.get_package_data(
+        "name",
+        channels="bioconda",
+        platform=PackageSubdir.LINUX_AARCH64,
+    ) == ["fresh"]
+    assert loaded_repositories == [(repository,)]
+
+
+def test_repodata_refreshes_full_dataframe_older_than_one_day(monkeypatch):
+    monkeypatch.setattr(utils.RepoData, "config", {"channels": ["bioconda"]})
+    repodata = utils.RepoData()
+    monkeypatch.setattr(repodata, "_df", _repodata_dataframe("old"))
+    monkeypatch.setattr(
+        repodata,
+        "_df_ts",
+        datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=30),
+    )
+    monkeypatch.setattr(repodata, "cache_file", None)
+    monkeypatch.setattr(repodata, "_repository_cache", {})
+    monkeypatch.setattr(repodata, "platforms", [PackageSubdir.LINUX_AARCH64])
+    monkeypatch.setattr(
+        repodata,
+        "_load_channel_dataframe",
+        lambda _repositories=None: _repodata_dataframe("fresh"),
+    )
+
+    assert list(repodata.df["name"]) == ["fresh"]
+
+
+def test_repodata_refreshes_disk_cache_older_than_one_day(monkeypatch, tmp_path):
+    monkeypatch.setattr(utils.RepoData, "config", {"channels": ["bioconda"]})
+    cache_file = tmp_path / "repodata.pkl"
+    _repodata_dataframe("old").to_pickle(cache_file)
+    expired_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=30)
+    os.utime(cache_file, (expired_at.timestamp(), expired_at.timestamp()))
+
+    repodata = utils.RepoData()
+    monkeypatch.setattr(repodata, "_df", None)
+    monkeypatch.setattr(repodata, "_df_ts", None)
+    monkeypatch.setattr(repodata, "cache_file", str(cache_file))
+    monkeypatch.setattr(repodata, "_repository_cache", {})
+    monkeypatch.setattr(
+        repodata,
+        "_load_channel_dataframe",
+        lambda _repositories=None: _repodata_dataframe("fresh"),
+    )
+
+    assert list(repodata.df["name"]) == ["fresh"]
 
 
 def test_filter_existing_packages_queries_rendered_target_subdir(monkeypatch):

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
+from collections import namedtuple
 from textwrap import dedent
 from unittest.mock import Mock
 
@@ -1276,6 +1277,45 @@ def test_filter_existing_packages_queries_rendered_target_subdir(monkeypatch):
 
     assert utils._filter_existing_packages([meta], ["bioconda"]) == ([meta], [], set())
     assert queried_platforms == [[PackageSubdir.LINUX_AARCH64, "noarch"]]
+
+
+def test_get_package_paths_force_builds_existing_and_logs_force(caplog, monkeypatch):
+    # get_package_data yields pandas itertuples rows for ["subdir", "build"]
+    ExistingBuild = namedtuple("ExistingBuild", ["subdir", "build"])
+    meta = Mock()
+    meta.name.return_value = "samtools"
+    meta.version.return_value = "1.24"
+    meta.build_number.return_value = 1
+    meta.build_id.return_value = "h391949c_1"
+    meta.pkg_fn.return_value = "samtools-1.24-h391949c_1"
+    meta.noarch = False
+    meta.noarch_python = False
+    meta.config.host_subdir = PackageSubdir.LINUX_64
+    existing_builds = [ExistingBuild(subdir=PackageSubdir.LINUX_64, build="h391949c_1")]
+
+    monkeypatch.setattr(utils.RepoData, "config", {"channels": ["bioconda"]})
+    monkeypatch.setattr(
+        utils,
+        "_load_platform_metas",
+        lambda *_a, **_k: (PackageSubdir.LINUX_64, [meta]),
+    )
+    monkeypatch.setattr(
+        utils.RepoData, "get_package_data", lambda _self, _keys, **_k: existing_builds
+    )
+    monkeypatch.setattr(
+        utils.api, "get_output_file_paths", lambda m: [f"/tmp/{m.pkg_fn()}.tar.bz2"]
+    )
+
+    caplog.set_level(logging.INFO, logger="bioconda_utils.utils")
+    paths = utils.get_package_paths("recipes/samtools", ["bioconda"], force=True)
+    assert paths == ["/tmp/samtools-1.24-h391949c_1.tar.bz2"]
+    assert "FORCE: building samtools-1.24-h391949c_1" in caplog.text
+    assert "it is not forced" not in caplog.text
+
+    caplog.clear()
+    paths = utils.get_package_paths("recipes/samtools", ["bioconda"], force=False)
+    assert paths == []
+    assert "it is not forced" in caplog.text
 
 
 def test_check_recipe_skippable_queries_requested_target(monkeypatch):

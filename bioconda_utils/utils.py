@@ -1168,15 +1168,20 @@ def get_package_paths(
     if divergent_builds:
         raise DivergentBuildsError(*sorted(divergent_builds))
 
-    for meta in existing_metas:
-        logger.info(
-            "FILTER: not building %s because it is in channel(s) and it is not forced.",
-            meta.pkg_fn(),
-        )
-    # yield all pkgs that do not yet exist
     if force:
+        for meta in existing_metas:
+            logger.info(
+                "FORCE: building %s although it is already in channel(s).",
+                meta.pkg_fn(),
+            )
         build_metas = new_metas + existing_metas
     else:
+        for meta in existing_metas:
+            logger.info(
+                "FILTER: not building %s because it is in channel(s) and it is not forced.",
+                meta.pkg_fn(),
+            )
+        # yield all pkgs that do not yet exist
         build_metas = new_metas
     return list(
         chain.from_iterable(api.get_output_file_paths(meta) for meta in build_metas)

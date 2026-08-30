@@ -1,5 +1,6 @@
 import base64
 import json
+import subprocess as sp
 from pathlib import Path
 
 import pytest
@@ -285,6 +286,85 @@ def test_reconcile_is_idempotent(monkeypatch):
     assert publish == []
 
 
+def test_current_descriptors_inspects_index_once(monkeypatch):
+    canonical = "quay.io/biocontainers/samtools:1.20--0"
+    digest = "sha256:" + "a" * 64
+    manifest = {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [
+            {
+                "digest": digest,
+                "platform": {"os": "linux", "architecture": "amd64"},
+            }
+        ],
+    }
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return sp.CompletedProcess(command, 0, stdout=json.dumps(manifest))
+
+    monkeypatch.setattr(container_manifests.utils, "run", run)
+    monkeypatch.setattr(container_manifests, "skopeo_env", dict)
+
+    assert container_manifests._current_descriptors(canonical, None) == {
+        ContainerPlatform.LINUX_AMD64: digest
+    }
+    assert len(calls) == 1
+    assert calls[0][0] == ["skopeo", "inspect", "--raw", f"docker://{canonical}"]
+    assert calls[0][1]["check"] is False
+
+
+def test_current_descriptors_inspects_single_image_twice(monkeypatch):
+    canonical = "quay.io/biocontainers/samtools:1.20--0"
+    digest = "sha256:" + "a" * 64
+    manifest = {"mediaType": "application/vnd.oci.image.manifest.v1+json"}
+    inspection = {
+        "Digest": digest,
+        "Os": "linux",
+        "Architecture": "arm64",
+    }
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        output = manifest if "--raw" in command else inspection
+        return sp.CompletedProcess(command, 0, stdout=json.dumps(output))
+
+    monkeypatch.setattr(container_manifests.utils, "run", run)
+    monkeypatch.setattr(container_manifests, "skopeo_env", dict)
+
+    assert container_manifests._current_descriptors(canonical, None) == {
+        ContainerPlatform.LINUX_ARM64: digest
+    }
+    assert [call[0] for call in calls] == [
+        ["skopeo", "inspect", "--raw", f"docker://{canonical}"],
+        ["skopeo", "inspect", "--no-tags", f"docker://{canonical}"],
+    ]
+
+
+@pytest.mark.parametrize("message", ["manifest unknown", "status code 404"])
+def test_inspect_raw_returns_none_for_missing_ref(monkeypatch, message):
+    def run(command, **_kwargs):
+        return sp.CompletedProcess(command, 1, stdout=message)
+
+    monkeypatch.setattr(container_manifests.utils, "run", run)
+    monkeypatch.setattr(container_manifests, "skopeo_env", dict)
+
+    assert container_manifests._inspect_raw("quay.io/example/missing:tag", None) is None
+
+
+def test_inspect_raw_raises_for_unexpected_failure(monkeypatch):
+    def run(command, **_kwargs):
+        return sp.CompletedProcess(command, 1, stdout="connection refused")
+
+    monkeypatch.setattr(container_manifests.utils, "run", run)
+    monkeypatch.setattr(container_manifests, "skopeo_env", dict)
+
+    with pytest.raises(RuntimeError, match="connection refused"):
+        container_manifests._inspect_raw("quay.io/example/image:tag", None)
+
+
 def test_current_descriptors_normalizes_registry_platform_variants(monkeypatch):
     canonical = "quay.io/biocontainers/samtools:1.20--0"
     manifest = {
@@ -304,7 +384,6 @@ def test_current_descriptors_normalizes_registry_platform_variants(monkeypatch):
             },
         ],
     }
-    monkeypatch.setattr(container_manifests, "_ref_exists", lambda *_args: True)
     monkeypatch.setattr(
         container_manifests,
         "_inspect_raw",
@@ -350,7 +429,6 @@ def test_reconcile_is_idempotent_with_registry_platform_variant(monkeypatch):
             },
         ],
     }
-    monkeypatch.setattr(container_manifests, "_ref_exists", lambda *_args: True)
     monkeypatch.setattr(
         container_manifests,
         "_inspect_raw",

@@ -24,10 +24,8 @@ from ._types import (
     normalize_container_platform,
 )
 from .utils import (
-    parse_oci_config_platform,
     skopeo_auth_args,
     skopeo_env,
-    skopeo_inspect_digest,
 )
 
 logger = logging.getLogger(__name__)
@@ -216,25 +214,46 @@ def _is_index(manifest: dict[str, Any]) -> bool:
     return manifest.get("mediaType") in INDEX_MEDIA_TYPES or "manifests" in manifest
 
 
-def _inspect_raw(ref: str, creds: str | None) -> dict[str, Any]:
+def _inspect_raw(ref: str, creds: str | None) -> dict[str, Any] | None:
     auth_args, redacted_secrets = skopeo_auth_args(creds, option="--creds")
-    raw = utils.run(
+    result = utils.run(
         ["skopeo", "inspect", "--raw", *auth_args, f"docker://{ref}"],
         redacted_secrets=redacted_secrets,
         env=skopeo_env(),
-    ).stdout
-    return json.loads(raw)
+        check=False,
+        quiet_failure=True,
+    )
+    if result.returncode == 0:
+        return json.loads(result.stdout)
+    output = result.stdout.lower()
+    if any(
+        marker in output
+        for marker in (
+            "manifest unknown",
+            "name unknown",
+            "status code 404",
+        )
+    ):
+        return None
+    raise RuntimeError(f"Unable to inspect registry ref {ref}: {result.stdout}")
 
 
-def _inspect_config_platform(ref: str, creds: str | None) -> ContainerPlatform:
+def _inspect_single_image(ref: str, creds: str | None) -> tuple[ContainerPlatform, str]:
+    """Return the platform and digest of a non-index image ref."""
     auth_args, redacted_secrets = skopeo_auth_args(creds, option="--creds")
     raw = utils.run(
-        ["skopeo", "inspect", "--config", *auth_args, f"docker://{ref}"],
+        ["skopeo", "inspect", "--no-tags", *auth_args, f"docker://{ref}"],
         redacted_secrets=redacted_secrets,
         env=skopeo_env(),
     ).stdout
-    config = json.loads(raw)
-    return parse_oci_config_platform(config, ref=ref)
+    inspection = json.loads(raw)
+    digest = inspection.get("Digest")
+    if not isinstance(digest, str) or not digest.startswith("sha256:"):
+        raise RuntimeError(f"Registry returned an invalid digest for {ref}: {digest}")
+    platform = normalize_container_platform(
+        inspection.get("Os"), inspection.get("Architecture"), ref=ref
+    )
+    return platform, digest
 
 
 def _descriptor_platform(descriptor: dict[str, Any]) -> ContainerPlatform:
@@ -246,37 +265,12 @@ def _descriptor_platform(descriptor: dict[str, Any]) -> ContainerPlatform:
     )
 
 
-def _ref_exists(ref: str, creds: str | None) -> bool:
-    auth_args, redacted_secrets = skopeo_auth_args(creds, option="--creds")
-    result = utils.run(
-        ["skopeo", "inspect", "--raw", *auth_args, f"docker://{ref}"],
-        redacted_secrets=redacted_secrets,
-        env=skopeo_env(),
-        check=False,
-        quiet_failure=True,
-    )
-    if result.returncode == 0:
-        return True
-    output = result.stdout.lower()
-    if any(
-        marker in output
-        for marker in (
-            "manifest unknown",
-            "name unknown",
-            "not found",
-            "status code 404",
-        )
-    ):
-        return False
-    raise RuntimeError(f"Unable to inspect registry ref {ref}: {result.stdout}")
-
-
 def _current_descriptors(
     canonical_ref: str, creds: str | None
 ) -> dict[ContainerPlatform, str] | None:
-    if not _ref_exists(canonical_ref, creds):
-        return None
     manifest = _inspect_raw(canonical_ref, creds)
+    if manifest is None:
+        return None
     if _is_index(manifest):
         descriptors: dict[ContainerPlatform, str] = {}
         for descriptor in manifest.get("manifests", []):
@@ -285,12 +279,10 @@ def _current_descriptors(
                 raise RuntimeError(f"{canonical_ref} has duplicate {platform} entries")
             descriptors[platform] = descriptor["digest"]
         return descriptors
-    # The digest request forces skopeo to resolve a single platform, which
-    # would crash for indexes without a descriptor for the host architecture
-    # (e.g. an arm64-only index inspected from amd64). Index digests are also
-    # never consumed here, so only compute it after ruling out an index.
-    digest = skopeo_inspect_digest(canonical_ref, creds)
-    platform = _inspect_config_platform(f"{canonical_ref}@{digest}", creds)
+    # Normal inspection resolves a platform, so only use it after ruling out an
+    # index. It returns both values needed for legacy single-image refs in one
+    # command, without listing all repository tags.
+    platform, digest = _inspect_single_image(canonical_ref, creds)
     return {platform: digest}
 
 

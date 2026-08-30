@@ -619,19 +619,26 @@ def dag(
         Literal["gml", "dot", "txt"],
         typer.Option(
             "--format",
-            help='Set format to print\n     graph. "gml" and "dot" can be imported into graph visualization tools\n     (graphviz, gephi, cytoscape). "txt" will print out recipes grouped by\n     independent subdags, largest subdag first, each in topologically sorted\n     order. Singleton subdags (if not hidden with --hide-singletons) are\n     reported as one large group at the end.',
+            help='Output format. "gml" and "dot" serialize the graph for visualization tools. "txt" lists recipe paths in dependency-first order, grouped by disconnected components. Disconnected packages are listed together at the end unless --hide-singletons is used.',
         ),
     ] = "gml",
     hide_singletons: Annotated[
         bool,
-        typer.Option("--hide-singletons", help="Hide singletons in the printed graph."),
+        typer.Option(
+            "--hide-singletons",
+            help="Omit packages with no dependency relationship to another selected package.",
+        ),
     ] = False,
     loglevel: LoglevelOpt = "info",
     logfile: LogfileOpt = None,
     logfile_level: LogfileLevelOpt = "debug",
     log_command_max_lines: LogCommandMaxLinesOpt = None,
 ) -> None:
-    """Export the DAG of packages to a graph format file for visualization"""
+    """Export the dependency DAG among selected packages.
+
+    Nodes are packages. An edge from A to B means that B has A as a build,
+    host, or run dependency.
+    """
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
     package_patterns: PackagePatterns = packages or ["*"]
     config_data = utils.load_config(config)
@@ -639,9 +646,7 @@ def dag(
         utils.get_recipes(recipe_folder, package_patterns), config_data
     )
     if hide_singletons:
-        for node in nx.nodes(dag):
-            if dag.degree(node) == 0:
-                dag.remove_node(node)
+        dag.remove_nodes_from(list(nx.isolates(dag)))
     if format == "gml":
         nx.write_gml(dag, sys.stdout.buffer)
     elif format == "dot":

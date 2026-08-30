@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, cast
 
+import networkx as nx
 import pytest
 from typer.core import TyperArgument
 from typer.main import get_command
@@ -105,6 +106,43 @@ def test_choices_are_enforced_before_command_execution():
 
     assert result.exit_code == 2
     assert "Invalid value for '--format'" in result.output
+
+
+def test_dag_help_describes_dependency_edges():
+    result = runner.invoke(cli.app, ["dag", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "dependency DAG among selected packages" in result.output
+    assert "An edge from A to B means that B has A as a build" in result.output
+
+
+def test_dag_hides_singletons(monkeypatch, tmp_path):
+    recipe_folder = tmp_path / "recipes"
+    recipe_folder.mkdir()
+    config = tmp_path / "config.yml"
+    config.write_text("{}")
+    package_dag = nx.DiGraph([("dependency", "package")])
+    package_dag.add_node("singleton")
+    name2recipes = {name: {Path("recipes") / name} for name in package_dag.nodes}
+    monkeypatch.setattr(cli.utils, "load_config", lambda _: {})
+    monkeypatch.setattr(cli.utils, "get_recipes", lambda *_: [])
+    monkeypatch.setattr(cli.graph, "build", lambda *_: (package_dag, name2recipes))
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "dag",
+            str(recipe_folder),
+            str(config),
+            "--format",
+            "txt",
+            "--hide-singletons",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert set(package_dag) == {"dependency", "package"}
+    assert "singleton" not in result.output
 
 
 @pytest.mark.parametrize(

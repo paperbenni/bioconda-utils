@@ -211,16 +211,19 @@ def resolve_registry_creds(*, use_existing_auth: bool = False) -> str | None:
     )
 
 
-def _inspect_raw(ref: str, creds: str | None) -> tuple[dict[str, Any], str]:
+def _is_index(manifest: dict[str, Any]) -> bool:
+    """Return whether a raw manifest is a multi-platform index."""
+    return manifest.get("mediaType") in INDEX_MEDIA_TYPES or "manifests" in manifest
+
+
+def _inspect_raw(ref: str, creds: str | None) -> dict[str, Any]:
     auth_args, redacted_secrets = skopeo_auth_args(creds, option="--creds")
     raw = utils.run(
         ["skopeo", "inspect", "--raw", *auth_args, f"docker://{ref}"],
         redacted_secrets=redacted_secrets,
         env=skopeo_env(),
     ).stdout
-    manifest = json.loads(raw)
-    digest = skopeo_inspect_digest(ref, creds)
-    return manifest, digest
+    return json.loads(raw)
 
 
 def _inspect_config_platform(ref: str, creds: str | None) -> ContainerPlatform:
@@ -273,8 +276,8 @@ def _current_descriptors(
 ) -> dict[ContainerPlatform, str] | None:
     if not _ref_exists(canonical_ref, creds):
         return None
-    manifest, digest = _inspect_raw(canonical_ref, creds)
-    if manifest.get("mediaType") in INDEX_MEDIA_TYPES or "manifests" in manifest:
+    manifest = _inspect_raw(canonical_ref, creds)
+    if _is_index(manifest):
         descriptors: dict[ContainerPlatform, str] = {}
         for descriptor in manifest.get("manifests", []):
             platform = _descriptor_platform(descriptor)
@@ -282,6 +285,11 @@ def _current_descriptors(
                 raise RuntimeError(f"{canonical_ref} has duplicate {platform} entries")
             descriptors[platform] = descriptor["digest"]
         return descriptors
+    # The digest request forces skopeo to resolve a single platform, which
+    # would crash for indexes without a descriptor for the host architecture
+    # (e.g. an arm64-only index inspected from amd64). Index digests are also
+    # never consumed here, so only compute it after ruling out an index.
+    digest = skopeo_inspect_digest(canonical_ref, creds)
     platform = _inspect_config_platform(f"{canonical_ref}@{digest}", creds)
     return {platform: digest}
 

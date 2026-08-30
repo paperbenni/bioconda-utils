@@ -308,7 +308,7 @@ def test_current_descriptors_normalizes_registry_platform_variants(monkeypatch):
     monkeypatch.setattr(
         container_manifests,
         "_inspect_raw",
-        lambda *_args: (manifest, "sha256:" + "0" * 64),
+        lambda *_args: manifest,
     )
 
     assert container_manifests._current_descriptors(canonical, None) == {
@@ -354,7 +354,7 @@ def test_reconcile_is_idempotent_with_registry_platform_variant(monkeypatch):
     monkeypatch.setattr(
         container_manifests,
         "_inspect_raw",
-        lambda *_args: (manifest, "sha256:" + "0" * 64),
+        lambda *_args: manifest,
     )
     publish = []
     monkeypatch.setattr(

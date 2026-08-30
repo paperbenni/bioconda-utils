@@ -45,6 +45,10 @@ class PackageSubdir(StrEnum):
 
 
 ALL_PACKAGE_SUBDIRS: tuple[PackageSubdir, ...] = tuple(PackageSubdir)
+DEFAULT_PRIMARY_PLATFORMS: tuple[PackageSubdir, ...] = (
+    PackageSubdir.LINUX_64,
+    PackageSubdir.OSX_64,
+)
 #: Conda repodata subdir notation, including ``noarch``.
 Subdir: TypeAlias = PackageSubdir | Literal["noarch"]
 #: A two-part OS label -- the form conda-build's ``config.platform`` and its

@@ -294,6 +294,7 @@ def _test_inputs(
     conda_bld_dir = path.resolve().parent.parent
 
     if update_local_index:
+        # conda-index uses spawn workers, so this cannot run from a REPL or python -c.
         update_index(str(conda_bld_dir))
 
     spec = get_image_name(path)

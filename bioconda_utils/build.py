@@ -25,6 +25,7 @@ from . import docker_utils, graph, lint, pkg_test, upload, utils
 from . import recipe as _recipe
 from ._types import (
     ALL_PACKAGE_SUBDIRS,
+    DEFAULT_PRIMARY_PLATFORMS,
     ContainerPlatform,
     PackageSubdir,
     PkgBuildRef,
@@ -448,7 +449,7 @@ def should_skip_platform(
     """
     recipe_obj = _recipe.Recipe.from_file(recipe_folder, recipe)
     primary_set = (
-        {PackageSubdir.LINUX_64, PackageSubdir.OSX_64}
+        set(DEFAULT_PRIMARY_PLATFORMS)
         if primary_platforms is None
         else set(primary_platforms)
     )

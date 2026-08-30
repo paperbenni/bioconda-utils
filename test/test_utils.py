@@ -18,6 +18,7 @@ import pandas as pd
 import pytest
 from conda_build import api, exceptions, metadata
 from helpers import Recipes, ensure_missing
+from jsonschema import ValidationError
 
 from bioconda_utils import (
     __version__,
@@ -1845,6 +1846,20 @@ def test_validate_config_smoke():
     }
     # Should not raise
     validate_config(cfg)
+
+
+@pytest.mark.parametrize(
+    "primary_platforms",
+    [None, [], ["linx-64"], ["linux-64", "linux-64"]],
+)
+def test_validate_config_rejects_invalid_primary_platforms(primary_platforms):
+    with pytest.raises(ValidationError):
+        validate_config({"primary_platforms": primary_platforms})
+
+
+@pytest.mark.parametrize("platform", PackageSubdir)
+def test_validate_config_accepts_every_package_subdir(platform):
+    validate_config({"primary_platforms": [platform.value]})
 
 
 def test_normalize_config_applies_defaults_without_mutating_input():

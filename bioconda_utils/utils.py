@@ -59,6 +59,7 @@ from yaspin.spinners import Spinners
 
 from bioconda_utils._types import (
     ALL_PACKAGE_SUBDIRS,
+    DEFAULT_PRIMARY_PLATFORMS,
     Config,
     ContainerPlatform,
     OCIImageConfig,
@@ -1221,7 +1222,7 @@ def normalize_config(config: dict[str, Any]) -> Config:
             "channels": ["conda-forge", "bioconda"],
             "requirements": None,
             "upload_channel": "bioconda",
-            "primary_platforms": [PackageSubdir.LINUX_64, PackageSubdir.OSX_64],
+            "primary_platforms": list(DEFAULT_PRIMARY_PLATFORMS),
         }
     )
     default_config.update(config)

@@ -156,7 +156,7 @@ class extra_additional_platforms_not_list(LintCheck):
 class extra_additional_platforms_invalid(LintCheck):
     """Each item in extra/additional-platforms must be a valid package subdir
 
-    Valid package subdirs: linux-64, linux-aarch64, linux-riscv64, osx-64, osx-arm64
+    Valid package subdirs are defined by ``ALL_PACKAGE_SUBDIRS``.
 
     Example::
 

@@ -62,6 +62,9 @@ PACKAGE_SUBDIR_TO_CONTAINER_PLATFORM: dict[PackageSubdir, ContainerPlatform] = {
     PackageSubdir.LINUX_AARCH64: ContainerPlatform.LINUX_ARM64,
     PackageSubdir.LINUX_RISCV64: ContainerPlatform.LINUX_RISCV64,
 }
+ALL_LINUX_PACKAGE_SUBDIRS: tuple[PackageSubdir, ...] = tuple(
+    PACKAGE_SUBDIR_TO_CONTAINER_PLATFORM.keys()
+)
 CONTAINER_PLATFORM_TO_PACKAGE_SUBDIR: dict[ContainerPlatform, PackageSubdir] = {
     container_platform: package_subdir
     for package_subdir, container_platform in PACKAGE_SUBDIR_TO_CONTAINER_PLATFORM.items()
@@ -74,7 +77,7 @@ def package_subdir_to_container_platform(
     """Return the Linux container platform that matches a conda package subdir."""
     try:
         return PACKAGE_SUBDIR_TO_CONTAINER_PLATFORM[package_subdir]
-    except KeyError as exc:
+    except (KeyError, ValueError) as exc:
         raise ValueError(
             f"{package_subdir} packages cannot be installed in Linux mulled containers"
         ) from exc
@@ -120,7 +123,7 @@ def parse_quay_upload_target(value: str | None) -> QuayUploadTarget | None:
         return None
     if not value or value != value.strip() or "/" in value or ":" in value:
         raise ValueError(
-            f"--quay-upload-target must be a single quay.io namespace, not {value!r}"
+            f"--container-upload-target must be a single quay.io namespace, not {value!r}"
         )
     return QuayUploadTarget(value)
 

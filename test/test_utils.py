@@ -9,8 +9,8 @@ import subprocess as sp
 import sys
 import tempfile
 import uuid
-from pathlib import Path
 from collections import namedtuple
+from pathlib import Path
 from textwrap import dedent
 from unittest.mock import Mock
 

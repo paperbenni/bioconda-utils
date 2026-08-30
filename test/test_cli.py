@@ -72,6 +72,9 @@ def test_build_uses_normalized_option_names():
     assert "--no-presolved-mulled-build-and-test" in option_names
     assert "--presolved-mulled-test" not in option_names
     assert "--no-presolved-mulled-test" not in option_names
+    assert "--container-upload-target" in option_names
+    assert "--mulled-upload-target" not in option_names
+    assert "--quay-upload-target" not in option_names
     assert "--testonly" not in option_names
     assert "--prelint" not in option_names
     assert all("_" not in option for option in option_names if option.startswith("-"))
@@ -88,9 +91,33 @@ def test_platform_options_have_one_source_of_truth_per_command():
 
     assert "--platform" in build_options
     assert "--container-platform" not in build_options
+    assert "--container-upload-target" in build_options
+    assert "--mulled-upload-target" not in build_options
+    assert "--quay-upload-target" not in build_options
+
     assert "--platform" in merged_pr_options
     assert "--package-platform" not in merged_pr_options
     assert "--container-platform" not in merged_pr_options
+    assert "--container-upload-target" in merged_pr_options
+    assert "--quay-upload-target" not in merged_pr_options
+    assert "--mulled-upload-target" not in merged_pr_options
+
+    create_mulled_manifests_options = {
+        option
+        for param in commands["create-mulled-manifests"].params
+        for option in param.opts
+    }
+    assert "--platform" in create_mulled_manifests_options
+    assert "--platforms" not in create_mulled_manifests_options
+    assert "--container-platform" not in create_mulled_manifests_options
+
+    annotate_options = {
+        option
+        for param in commands["annotate-build-failures"].params
+        for option in param.opts
+    }
+    assert "--platform" in annotate_options
+    assert "--platforms" not in annotate_options
 
 
 def test_handle_merged_pr_requires_repository_and_git_range():
@@ -182,13 +209,36 @@ def test_cli_rejects_two_dot_git_range(monkeypatch):
     assert "main...HEAD" not in result.output
 
 
-def test_cli_rejects_invalid_quay_target_before_building():
+def test_cli_rejects_invalid_quay_target_before_building(tmp_path):
     result = runner.invoke(
-        cli.app, ["build", "--mulled-upload-target", "namespace/repository"]
+        cli.app, ["build", "--container-upload-target", "namespace/repository"]
     )
 
     assert result.exit_code == 2
     assert "must be a single quay.io namespace" in result.output
+
+    recipe_folder = tmp_path / "recipes"
+    recipe_folder.mkdir()
+    config = tmp_path / "config.yml"
+    config.touch()
+
+    result_pr = runner.invoke(
+        cli.app,
+        [
+            "handle-merged-pr",
+            str(recipe_folder),
+            str(config),
+            "--repo",
+            "bioconda/bioconda-recipes",
+            "--git-range",
+            "HEAD~1...HEAD",
+            "--container-upload-target",
+            "namespace/repository",
+        ],
+    )
+
+    assert result_pr.exit_code == 2
+    assert "must be a single quay.io namespace" in result_pr.output
 
 
 def test_recipe_selection_uses_range_base_and_ref(monkeypatch):
@@ -254,7 +304,7 @@ def test_build_rejects_macos_package_platform_for_docker():
     result = runner.invoke(cli.app, ["build", "--docker", "--platform", "osx-arm64"])
 
     assert result.exit_code == 2
-    assert "is not one of 'linux-64', 'linux-aarch64', 'linux-riscv64'" in result.output
+    assert "cannot be installed in Linux mulled containers" in result.output
 
 
 def test_handle_merged_pr_parses_conda_platform_option(tmp_path):
@@ -279,6 +329,58 @@ def test_handle_merged_pr_parses_conda_platform_option(tmp_path):
     )
 
     assert context.params["package_platform"] == cli.PackageSubdir.LINUX_AARCH64
+
+
+def test_create_mulled_manifests_parses_conda_platform_option():
+    command = cast(Any, get_command(cli.app)).commands["create-mulled-manifests"]
+    context = command.make_context(
+        "create-mulled-manifests",
+        ["--platform", "linux-aarch64", "--platform", "linux-64"],
+    )
+    assert context.params["platform"] == (
+        cli.PackageSubdir.LINUX_AARCH64,
+        cli.PackageSubdir.LINUX_64,
+    )
+
+
+def test_create_mulled_manifests_rejects_container_platform_notation():
+    result = runner.invoke(
+        cli.app, ["create-mulled-manifests", "--platform", "linux/arm64"]
+    )
+    assert result.exit_code == 2
+    assert "is not one of 'linux-64', 'linux-aarch64', 'linux-riscv64'" in result.output
+
+
+def test_create_mulled_manifests_rejects_macos_package_platform():
+    result = runner.invoke(cli.app, ["create-mulled-manifests", "--platform", "osx-64"])
+    assert result.exit_code == 2
+    assert "cannot be installed in Linux mulled containers" in result.output
+
+
+def test_annotate_build_failures_parses_conda_platform_option():
+    command = cast(Any, get_command(cli.app)).commands["annotate-build-failures"]
+    context = command.make_context(
+        "annotate-build-failures",
+        ["recipes/samtools", "--platform", "linux-aarch64", "--platform", "osx-64"],
+    )
+    assert context.params["platform"] == (
+        cli.PackageSubdir.LINUX_AARCH64,
+        cli.PackageSubdir.OSX_64,
+    )
+
+
+def test_annotate_build_failures_rejects_container_platform_notation():
+    result = runner.invoke(
+        cli.app,
+        [
+            "annotate-build-failures",
+            "recipes/samtools",
+            "--platform",
+            "linux/arm64",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "is not one of" in result.output
 
 
 def test_build_uses_environment_aware_mulled_image_default():

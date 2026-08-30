@@ -12,7 +12,7 @@ import warnings
 from collections import Counter, defaultdict
 from functools import partial
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, Literal
 
 import click
 import conda
@@ -69,11 +69,6 @@ logger = logging.getLogger(__name__)
 
 LogLevel = Literal["debug", "info", "warning", "error", "critical"]
 PackagePatterns = list[str]
-BuildPlatform = Literal[
-    PackageSubdir.LINUX_64,
-    PackageSubdir.LINUX_AARCH64,
-    PackageSubdir.LINUX_RISCV64,
-]
 
 # Shared CLI parameter type aliases
 
@@ -121,7 +116,7 @@ def _parse_git_range_if_needed(git_range: str | None) -> GitRange | None:
 
 
 def _container_platform_for_build(
-    platform: BuildPlatform | None, docker: bool
+    platform: PackageSubdir | None, docker: bool
 ) -> ContainerPlatform | None:
     if platform is None:
         return None
@@ -363,7 +358,7 @@ def build(
         bool, typer.Option("--docker", help="Build packages in docker container.")
     ] = False,
     platform: Annotated[
-        BuildPlatform | None,
+        PackageSubdir | None,
         typer.Option(
             "--platform",
             help="Conda package subdirectory to build. Requires --docker.",
@@ -397,11 +392,11 @@ def build(
             help="After building recipes, upload\n     them to Anaconda. This requires $ANACONDA_TOKEN to be set.",
         ),
     ] = False,
-    mulled_upload_target: Annotated[
+    container_upload_target: Annotated[
         str | None,
         typer.Option(
-            "--mulled-upload-target",
-            help="Provide a quay.io target to push mulled docker images to.",
+            "--container-upload-target",
+            help="Provide a quay.io target to push container images to.",
         ),
     ] = None,
     build_image: Annotated[
@@ -529,7 +524,7 @@ def build(
     """Build and test Bioconda recipes."""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
     target_platform = _container_platform_for_build(platform, docker)
-    parsed_upload_target = _parse_quay_upload_target(mulled_upload_target)
+    parsed_upload_target = _parse_quay_upload_target(container_upload_target)
     mulled_upload_records = _resolve_mulled_upload_records(
         mulled_upload_records, parsed_upload_target
     )
@@ -920,7 +915,7 @@ def update_pinning(
         list[str] | None,
         typer.Option(
             "--skip-additional-channels",
-            help="Skip updating/bumping packges that are already built with\n     compatible pinnings in one of the given channels in addition to those\n     listed in 'config'.",
+            help="Skip updating/bumping packages that are already built with\n     compatible pinnings in one of the given channels in addition to those\n     listed in 'config'.",
         ),
     ] = None,
     skip_variants: Annotated[
@@ -1092,7 +1087,7 @@ def bioconductor_skeleton(
         list[str] | None,
         typer.Option(
             "--skip-if-in-channels",
-            help="When --recursive is used, it will build\n     *all* recipes. Use this argument to skip recipes for packages\n     that already exist in the packages listed here.",
+            help="When --recursive is used, it will build\n     *all* recipes. Use this argument to skip recipes for packages\n     that already exist in the channels listed here.",
         ),
     ] = None,
     loglevel: LoglevelOpt = "debug",
@@ -1292,7 +1287,7 @@ def autobump(
         int, typer.Option("--max-updates", help="Stop after this many updates")
     ] = 0,
     dry_run: Annotated[
-        bool, typer.Option("--dry-run", help="Don't update remote git or github\"")
+        bool, typer.Option("--dry-run", help="Don't update remote git or github.")
     ] = False,
     no_check_pinnings: Annotated[
         bool,
@@ -1302,7 +1297,7 @@ def autobump(
         bool,
         typer.Option(
             "--no-follow-graph",
-            help="Don't process recipes in graph order or add dependent recipes\n     to checks. Implies --no-skip-pending-deps.",
+            help="Don't process recipes in graph order or add dependent recipes\n     to checks. Implies --no-check-pending-deps.",
         ),
     ] = False,
     no_check_version_update: Annotated[
@@ -1316,7 +1311,7 @@ def autobump(
         bool,
         typer.Option(
             "--no-check-pending-deps",
-            help="Don't check for recipes having a dependency with a pending update.\n     Update all recipes, including those having deps in need or rebuild.",
+            help="Don't check for recipes having a dependency with a pending update.\n     Update all recipes, including those having deps in need of rebuild.",
         ),
     ] = False,
     sign: Annotated[
@@ -1506,11 +1501,11 @@ def handle_merged_pr(
             "--fallback", help="What to do if no artifacts are found in the PR."
         ),
     ] = "build",
-    quay_upload_target: Annotated[
+    container_upload_target: Annotated[
         str | None,
         typer.Option(
-            "--quay-upload-target",
-            help="Provide a quay.io target to push docker images to.",
+            "--container-upload-target",
+            help="Provide a quay.io target to push container images to.",
         ),
     ] = None,
     artifact_source: Annotated[
@@ -1538,7 +1533,7 @@ def handle_merged_pr(
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
     label = os.getenv("BIOCONDA_LABEL", None) or None
     parsed_git_range = _parse_git_range(git_range)
-    parsed_upload_target = _parse_quay_upload_target(quay_upload_target)
+    parsed_upload_target = _parse_quay_upload_target(container_upload_target)
     mulled_upload_records = _resolve_mulled_upload_records(
         mulled_upload_records, parsed_upload_target
     )
@@ -1568,7 +1563,7 @@ def handle_merged_pr(
             fallback_build_platform = None
         else:
             fallback_docker = True
-            fallback_build_platform = cast(BuildPlatform, fallback_package_platform)
+            fallback_build_platform = fallback_package_platform
 
         success = build(
             recipe_folder,
@@ -1577,7 +1572,7 @@ def handle_merged_pr(
             docker=fallback_docker,
             platform=fallback_build_platform,
             anaconda_upload=not dry_run,
-            mulled_upload_target=parsed_upload_target if not dry_run else None,
+            container_upload_target=parsed_upload_target if not dry_run else None,
             mulled_build_and_test=True,
             mulled_upload_records=mulled_upload_records,
             use_existing_auth=use_existing_auth,
@@ -1596,10 +1591,10 @@ def create_mulled_manifests(
         ),
     ] = None,
     platform: Annotated[
-        list[ContainerPlatform] | None,
+        list[PackageSubdir] | None,
         typer.Option(
             "--platform",
-            help="Platforms to include. Defaults to all supported platforms.",
+            help="Conda package subdirectories to include (e.g. linux-64, linux-aarch64). Defaults to all supported platforms.",
         ),
     ] = None,
     use_existing_auth: UseExistingAuthOpt = False,
@@ -1625,9 +1620,17 @@ def create_mulled_manifests(
     if not records:
         logger.info("No mulled image records found; nothing to reconcile.")
         return
+    try:
+        target_platforms = (
+            [package_subdir_to_container_platform(p) for p in platform]
+            if platform
+            else list(ALL_CONTAINER_PLATFORMS)
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--platform") from exc
     changed, total = reconcile_manifests(
         records,
-        platform or list(ALL_CONTAINER_PLATFORMS),
+        target_platforms,
         creds=resolve_registry_creds(use_existing_auth=use_existing_auth),
     )
     logger.info("Manifest summary: %d changed, %d checked", changed, total)
@@ -1636,7 +1639,7 @@ def create_mulled_manifests(
 @app.command("annotate-build-failures")
 def annotate_build_failures(
     recipes: Annotated[
-        list[Path], typer.Argument(help="Paths to recipes that shall be skiplisted")
+        list[Path], typer.Argument(help="Paths to recipes with build failures")
     ],
     skiplist: Annotated[
         bool, typer.Option("--skiplist", help="Skiplist recipes.")
@@ -1663,8 +1666,9 @@ def annotate_build_failures(
             help="Category of build failure. If omitted, will fail if there is no existing build failure record with a log entry.",
         ),
     ] = None,
-    platforms: Annotated[
-        list[str] | None, typer.Option("--platforms", help="Platforms to annotate")
+    platform: Annotated[
+        list[PackageSubdir] | None,
+        typer.Option("--platform", help="Conda package subdirectories to annotate"),
     ] = None,
     existing_only: Annotated[
         bool,
@@ -1675,23 +1679,22 @@ def annotate_build_failures(
     ] = False,
 ) -> None:
     """Create or update recipe build-failure records."""
-    valid_platform_names = set(conda.base.constants.PLATFORM_DIRECTORIES)
-    if platforms is None:
-        platforms = [p for p in utils.RepoData.platforms if p != "noarch"]
+    target_platforms = (
+        platform
+        if platform is not None
+        else [p for p in utils.RepoData.platforms if p != "noarch"]
+    )
     for recipe in recipes:
         if existing_only:
-            platforms = [
-                platform
-                for platform in conda.base.constants.PLATFORM_DIRECTORIES
-                if BuildFailureRecord(recipe, platform=platform).exists()
+            recipe_platforms = [
+                plat
+                for plat in conda.base.constants.PLATFORM_DIRECTORIES
+                if BuildFailureRecord(recipe, platform=plat).exists()
             ]
-        for platform in platforms:
-            if platform not in valid_platform_names:
-                logger.error(
-                    f"Invalid platform {platform}, choose from: {', '.join(valid_platform_names)}"
-                )
-                continue
-            failure_record = BuildFailureRecord(recipe, platform=platform)
+        else:
+            recipe_platforms = target_platforms
+        for plat in recipe_platforms:
+            failure_record = BuildFailureRecord(recipe, platform=plat)
             if not reason and failure_record.exists():
                 if not failure_record.log:
                     logger.error(
@@ -1737,13 +1740,11 @@ def list_build_failures(
         link_prefix=link_prefix,
         git_range=parsed_git_range,
     )
-    if output_format == "markdown":
-        fmt_writer = pandas.DataFrame.to_markdown
-    elif output_format == "txt":
-        fmt_writer = pandas.DataFrame.to_string
-    else:
-        logger.error("Invalid output format, must be txt or markdown.")
-        sys.exit(1)
+    fmt_writer = (
+        pandas.DataFrame.to_markdown
+        if output_format == "markdown"
+        else pandas.DataFrame.to_string
+    )
     fmt_writer(df, sys.stdout, index=False)
 
 

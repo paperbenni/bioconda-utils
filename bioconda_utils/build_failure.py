@@ -231,6 +231,18 @@ class BuildFailureRecord:
         self.inner["category"] = value
 
 
+BUILD_FAILURE_COLUMNS: list[str] = [
+    "recipe",
+    "downloads",
+    "depending",
+    "skiplisted",
+    "category",
+    "build failures",
+    "pull requests",
+    "reason",
+]
+
+
 def collect_build_failure_dataframe(
     recipe_folder: Path,
     config: dict[str, Any],
@@ -274,7 +286,7 @@ def collect_build_failure_dataframe(
 
     dag, _ = graph.build(recipes, config)
 
-    def get_data() -> Iterator[tuple[str, Any, int, bool, str, str, str, str]]:
+    def get_data() -> Iterator[dict[str, Any]]:
         for recipe in utils.tqdm(recipes, desc="Checking recipes"):
             if not has_build_failure(recipe):
                 continue
@@ -318,29 +330,17 @@ def collect_build_failure_dataframe(
                     label="show",
                 )
 
-                yield (
-                    str(rel_recipe),
-                    downloads,
-                    descendants,
-                    skiplisted,
-                    categories,
-                    failures,
-                    prs,
-                    reasons,
-                )
+                yield {
+                    "recipe": str(rel_recipe),
+                    "downloads": downloads,
+                    "depending": descendants,
+                    "skiplisted": skiplisted,
+                    "category": categories,
+                    "build failures": failures,
+                    "pull requests": prs,
+                    "reason": reasons,
+                }
 
-    data = pd.DataFrame(
-        get_data(),
-        columns=[
-            "recipe",
-            "downloads",
-            "depending",
-            "skiplisted",
-            "category",
-            "build failures",
-            "pull requests",
-            "reason",
-        ],
-    )
+    data = pd.DataFrame(get_data(), columns=BUILD_FAILURE_COLUMNS)
     data.sort_values(by=["depending", "downloads"], ascending=False, inplace=True)
     return data

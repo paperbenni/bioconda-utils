@@ -12,7 +12,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
-from conda_build import exceptions, metadata
+from conda_build import api, exceptions, metadata
 from helpers import Recipes, ensure_missing
 
 from bioconda_utils import (
@@ -23,7 +23,7 @@ from bioconda_utils import (
     upload,
     utils,
 )
-from bioconda_utils._types import Config, PackageSubdir
+from bioconda_utils._types import Config, ContainerPlatform, PackageSubdir
 from bioconda_utils.utils import validate_config
 
 logger = logging.getLogger(__name__)
@@ -1050,6 +1050,45 @@ def test_load_meta_skipping():
     r.write_recipes()
     recipe = r.recipe_dirs["one"]
     assert utils.load_all_meta(recipe) == []
+
+
+@pytest.mark.parametrize(
+    ("target_platform", "expected_subdir"),
+    [
+        (ContainerPlatform.LINUX_AMD64, PackageSubdir.LINUX_64),
+        (ContainerPlatform.LINUX_ARM64, PackageSubdir.LINUX_AARCH64),
+        (ContainerPlatform.LINUX_RISCV64, PackageSubdir.LINUX_RISCV64),
+    ],
+)
+def test_load_platform_metas_preserves_complete_target_platform(
+    target_platform, expected_subdir
+):
+    recipes = Recipes(
+        """
+        one:
+          meta.yaml: |
+            package:
+              name: one
+              version: "0.1"
+        """,
+        from_string=True,
+    )
+    recipes.write_recipes()
+
+    subdir, metas = utils._load_platform_metas(
+        recipes.recipe_dirs["one"],
+        finalize=False,
+        target_platform=target_platform,
+    )
+
+    assert subdir == expected_subdir
+    assert len(metas) == 1
+    meta = metas[0]
+    assert meta.config.build_subdir == expected_subdir
+    assert meta.config.host_subdir == expected_subdir
+    assert meta.config.target_subdir == expected_subdir
+    assert meta.config.variant["target_platform"] == expected_subdir
+    assert Path(api.get_output_file_paths(meta)[0]).parent.name == expected_subdir
 
 
 def test_native_platform_skipping(config_fixture):

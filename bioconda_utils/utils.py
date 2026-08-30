@@ -590,17 +590,22 @@ def subdir_to_oslabel(subdir: PackageSubdir) -> OsLabel:
     conda-build keys :data:`conda_build.variants.DEFAULT_COMPILERS` on the bare
     OS label (``linux``/``osx``) and joins it with the arch to form the build
     subdir. Passing a full subdir such as ``"linux-64"`` therefore raises
-    ``KeyError`` at render time. Use this at the ``config.platform`` boundary.
+    ``KeyError`` at render time. This conversion deliberately discards the
+    architecture; callers configuring a render target must pass the complete
+    subdir to :func:`load_conda_build_config` instead.
     """
     return "linux" if subdir.startswith("linux") else "osx"
 
 
-def load_conda_build_config(platform: OsLabel | None = None, trim_skip: bool = True):
+def load_conda_build_config(
+    subdir: PackageSubdir | None = None, trim_skip: bool = True
+):
     """
     Load conda build config while considering global pinnings from conda-forge.
 
-    ``platform`` is a two-part OS label (``"linux"``/``"osx"``), *not* a subdir;
-    pass it through :func:`subdir_to_oslabel` first.
+    When ``subdir`` is supplied, configure conda-build to render as though it
+    were running natively on that complete OS/architecture pair. This mirrors
+    the environment used by architecture-specific Docker builds.
     """
     config_kwargs: dict[str, Any] = {"no_download_source": True, "set_build_id": False}
     if RepoData.config is not None:
@@ -622,8 +627,10 @@ def load_conda_build_config(platform: OsLabel | None = None, trim_skip: bool = T
     variant_config_files = getattr(config, "variant_config_files", None) or []
     for cfg in chain(config.exclusive_config_files, variant_config_files):
         assert os.path.exists(cfg), f"error: {cfg} does not exist"
-    if platform:
-        config.platform = platform
+    if subdir is not None and config.subdir != subdir:
+        os_label = subdir_to_oslabel(subdir)
+        config.platform = os_label
+        config.arch = subdir.removeprefix(f"{os_label}-")
     cast(Any, config).trim_skip = trim_skip
     return config
 
@@ -1016,7 +1023,7 @@ def _load_platform_metas(recipe, finalize=True, target_platform=None):
         subdir = container_platform_to_package_subdir(target_platform)
     else:
         subdir = RepoData.native_subdir()
-    config = load_conda_build_config(platform=subdir_to_oslabel(subdir))
+    config = load_conda_build_config(subdir=subdir)
     return subdir, load_all_meta(recipe, config=config, finalize=finalize)
 
 

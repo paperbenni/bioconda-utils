@@ -361,7 +361,7 @@ class RecipeBuilder:
         if self.target_platform is not None:
             command += ["--platform", self.target_platform]
         command.append(image)
-        utils.run(command, redacted_secrets=False, live=True)
+        utils.run(command, live=True)
 
     def _get_config_path(
         self, staging_prefix: str, i: int, config_file: CondaBuildConfigFile
@@ -482,7 +482,7 @@ class RecipeBuilder:
 
         try:
             with utils.Progress():
-                p = utils.run(cmd, redacted_secrets=False)
+                p = utils.run(cmd)
         except sp.CalledProcessError:
             logger.error(
                 "DOCKER FAILED: Error building docker container %s. ",
@@ -599,13 +599,13 @@ class RecipeBuilder:
 
         logger.debug("DOCKER: cmd: %s", cmd)
         with utils.Progress():
-            p = utils.run(cmd, redacted_secrets=False, live=live_logs)
+            p = utils.run(cmd, live=live_logs)
         return p
 
     def cleanup(self) -> None:
         if self.build_image and not self.keep_image:
             cmd = ["docker", "rmi", self.docker_temp_image]
-            utils.run(cmd, redacted_secrets=False)
+            utils.run(cmd)
 
 
 def purgeImage(
@@ -621,9 +621,9 @@ def purgeImage(
     registry.
     """
     cmd = ["docker", "rmi", local_mulled_image_ref(img, target_platform)]
-    utils.run(cmd, redacted_secrets=False)
+    utils.run(cmd)
 
 
 def pruneStoppedContainers() -> None:
     cmd = ["docker", "container", "prune", "-f"]
-    utils.run(cmd, redacted_secrets=False)
+    utils.run(cmd)

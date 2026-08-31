@@ -568,7 +568,6 @@ class Linter:
             # Obtain commit message from last commit.
             commit_message = utils.run(
                 ["git", "log", "--format=%B", "-n", "1"],
-                redacted_secrets=False,
                 loglevel=0,
             ).stdout
 

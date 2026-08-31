@@ -1,11 +1,12 @@
 import json
+import logging
 import os
 import subprocess as sp
 from unittest.mock import Mock
 
 import pytest
 
-from bioconda_utils import _types, build, cli, docker_utils, pkg_test, upload
+from bioconda_utils import _types, build, cli, docker_utils, pkg_test, upload, utils
 from bioconda_utils._types import ContainerPlatform, PackageSubdir, PkgBuildRef
 
 SAMTOOLS_1_3_0 = PkgBuildRef(name="samtools", version="1.3", build_string="0")
@@ -396,7 +397,6 @@ def test_recipe_builder_fails_when_base_image_cannot_be_pulled(monkeypatch):
 def test_mulled_upload_passes_target_platform(monkeypatch):
     commands = []
     monkeypatch.setenv("QUAY_LOGIN", "user:token")
-    monkeypatch.setattr(upload, "ensure_quay_repository", lambda *_args: None)
     monkeypatch.setattr(upload.utils, "skopeo_env", dict)
 
     def run(cmd, **_kwargs):
@@ -436,7 +436,6 @@ def test_mulled_upload_passes_target_platform(monkeypatch):
 def test_mulled_upload_stages_amd64_under_suffixed_tag(monkeypatch):
     commands = []
     monkeypatch.setenv("QUAY_LOGIN", "user:token")
-    monkeypatch.setattr(upload, "ensure_quay_repository", lambda *_args: None)
     monkeypatch.setattr(upload.utils, "skopeo_env", dict)
 
     def run(cmd, **_kwargs):
@@ -462,7 +461,6 @@ def test_mulled_upload_stages_amd64_under_suffixed_tag(monkeypatch):
 
 def test_mulled_upload_rejects_wrong_source_platform(monkeypatch):
     monkeypatch.setenv("QUAY_LOGIN", "user:token")
-    monkeypatch.setattr(upload, "ensure_quay_repository", lambda *_args: None)
     monkeypatch.setattr(upload.utils, "skopeo_env", dict)
     monkeypatch.setattr(
         upload.utils,
@@ -481,7 +479,6 @@ def test_mulled_upload_rejects_wrong_source_platform(monkeypatch):
 def test_upload_mulled_image_source_records_destination_digest(monkeypatch):
     commands = []
     monkeypatch.setenv("QUAY_LOGIN", "user:token")
-    monkeypatch.setattr(upload, "ensure_quay_repository", lambda *_args: None)
     monkeypatch.setattr(upload.utils, "skopeo_env", dict)
 
     def run(cmd, **_kwargs):
@@ -526,7 +523,6 @@ def test_upload_mulled_image_source_can_use_ambient_registry_auth(monkeypatch):
     commands = []
     monkeypatch.delenv("QUAY_LOGIN", raising=False)
     monkeypatch.delenv("QUAY_OAUTH_TOKEN", raising=False)
-    monkeypatch.setattr(upload, "ensure_quay_repository", lambda *_args: None)
     monkeypatch.setattr(upload.utils, "skopeo_env", dict)
 
     def run(cmd, **_kwargs):
@@ -552,39 +548,6 @@ def test_upload_mulled_image_source_can_use_ambient_registry_auth(monkeypatch):
 
     assert "--dest-creds" not in commands[1]
     assert "--creds" not in commands[2]
-
-
-def test_ensure_quay_repository_creates_public_repository(monkeypatch):
-    upload._QUAY_REPOSITORIES_READY.clear()
-    monkeypatch.setenv("QUAY_OAUTH_TOKEN", "token")
-    not_found = Mock(status_code=404)
-    created = Mock(status_code=201)
-    get = Mock(return_value=not_found)
-    post = Mock(return_value=created)
-    monkeypatch.setattr(upload.requests, "get", get)
-    monkeypatch.setattr(upload.requests, "post", post)
-
-    upload.ensure_quay_repository("biocontainers", "samtools")
-
-    post.assert_called_once()
-    assert post.call_args.kwargs["json"]["visibility"] == "public"
-
-
-def test_ensure_quay_repository_makes_private_repository_public(monkeypatch):
-    upload._QUAY_REPOSITORIES_READY.clear()
-    monkeypatch.setenv("QUAY_OAUTH_TOKEN", "token")
-    private = Mock(status_code=200)
-    private.json.return_value = {"is_public": False}
-    changed = Mock(status_code=200)
-    get = Mock(return_value=private)
-    post = Mock(return_value=changed)
-    monkeypatch.setattr(upload.requests, "get", get)
-    monkeypatch.setattr(upload.requests, "post", post)
-
-    upload.ensure_quay_repository("biocontainers", "samtools")
-
-    assert post.call_args.args[0].endswith("/samtools/changevisibility")
-    assert post.call_args.kwargs["json"] == {"visibility": "public"}
 
 
 def test_purge_image_removes_biocontainers_local_image(monkeypatch):
@@ -615,7 +578,6 @@ def test_mulled_upload_sources_local_image_from_biocontainers(monkeypatch):
     image as biocontainers. Guards the same namespace split that broke
     purgeImage: the destination is target-namespaced, but the source is not."""
     monkeypatch.setenv("QUAY_LOGIN", "user:token")
-    monkeypatch.setattr(upload, "ensure_quay_repository", lambda *_args: None)
     monkeypatch.setattr(upload.utils, "skopeo_env", dict)
 
     sources = []
@@ -642,3 +604,29 @@ def test_mulled_upload_sources_local_image_from_biocontainers(monkeypatch):
     )
 
     assert sources == ["docker-daemon:quay.io/biocontainers/samtools:1.3--0"]
+
+
+def test_utils_run_logs_and_redacts_secrets(caplog):
+    with caplog.at_level(logging.INFO):
+        utils.run(["echo", "hello", "world"])
+        assert "(COMMAND) echo hello world" in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        utils.run(["echo", "supersecret123", "public"], secrets=["supersecret123"])
+        assert "(COMMAND) echo <hidden> public" in caplog.text
+        assert "supersecret123" not in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        # A bare string is a single secret, not a sequence of characters
+        utils.run(["echo", "supersecret123", "public"], secrets="supersecret123")
+        assert "(COMMAND) echo <hidden> public" in caplog.text
+        assert "supersecret123" not in caplog.text
+
+
+def test_utils_run_rejects_removed_redacted_secrets_kwarg():
+    # The pre-`secrets` kwarg is gone; unknown kwargs are forwarded to Popen,
+    # which rejects it instead of silently skipping redaction.
+    with pytest.raises(TypeError):
+        utils.run(["echo", "hello"], redacted_secrets=["s3cret"])

@@ -144,10 +144,9 @@ class BuildFailureRecord:
 
     def commit_and_push_changes(self) -> None:
         """Commit and push any changes, including removal of the record."""
-        utils.run(["git", "add", str(self.path)], redacted_secrets=False)
+        utils.run(["git", "add", str(self.path)])
         if utils.run(
             ["git", "diff", "--quiet", "--exit-code", "HEAD", "--", str(self.path)],
-            redacted_secrets=False,
             check=False,
             quiet_failure=True,
         ).returncode:
@@ -159,7 +158,6 @@ class BuildFailureRecord:
                     "-m",
                     f"[ci skip] {operation} build failure record for recipe {self.recipe_path}",
                 ],
-                redacted_secrets=False,
             )
             for _ in range(3):
                 try:
@@ -169,8 +167,8 @@ class BuildFailureRecord:
                     # We don't want to use merge commits here because they would all trigger subsequent CI runs
                     # since they lack the [ci skip] part. Further, they would pollute the git history.
                     # If the rebase fails, we simply get an error.
-                    utils.run(["git", "pull", "--rebase"], redacted_secrets=False)
-                    utils.run(["git", "push"], redacted_secrets=False)
+                    utils.run(["git", "pull", "--rebase"])
+                    utils.run(["git", "push"])
                     return
                 except sp.CalledProcessError:
                     time.sleep(1)

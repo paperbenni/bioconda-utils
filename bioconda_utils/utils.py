@@ -456,10 +456,10 @@ def skopeo_auth_args(creds: str | None, *, option: str) -> tuple[list[str], list
 
 def skopeo_inspect_digest(ref: str, creds: str | None) -> str:
     """Inspect a remote image ref and return its registry digest."""
-    auth_args, redacted_secrets = skopeo_auth_args(creds, option="--creds")
+    auth_args, secrets = skopeo_auth_args(creds, option="--creds")
     digest = run(
         ["skopeo", "inspect", "--format", "{{.Digest}}", *auth_args, f"docker://{ref}"],
-        redacted_secrets=redacted_secrets,
+        secrets=secrets,
         env=skopeo_env(),
     ).stdout.strip()
     if not digest.startswith("sha256:"):
@@ -685,15 +685,14 @@ def load_first_metadata(recipe, config=None, finalize=True):
 
 
 def run(
-    cmds: list[str],
+    cmds: Sequence[str] | str,
     env: dict[str, str] | None = None,
-    redacted_secrets: list[str] | bool | None = None,
-    mask_envvars: bool = False,
+    secrets: Sequence[str] | None = None,
     live: bool = False,
     mylogger: logging.Logger = logger,
     loglevel: int = logging.INFO,
-    check=True,
-    quiet_failure=False,
+    check: bool = True,
+    quiet_failure: bool = False,
     **kwargs: Any,
 ) -> sp.CompletedProcess:
     """
@@ -702,14 +701,14 @@ def run(
     - Explicitly decodes stdout to avoid UnicodeDecodeErrors that can occur when
       using the ``universal_newlines=True`` argument in the standard
       subprocess.run.
-    - Masks secrets
-    - Passed live output to `logging`
+    - Masks secrets when supplied
+    - Passes live output to `logging`
 
     Arguments:
-      cmd: List of command and arguments
+      cmds: List of command and arguments
       env: Optional environment for command, if None, use environment of the parent process
-      redacted_secrets: List of terms to redact (secrets)
-      mask_envvars: Mask all environment variables; used if redacted_secrets is None.
+      secrets: Optional sequence of terms to redact (secrets) from logs and
+        output. A single term may be passed as a bare string.
       live: Whether output should be sent to log
       check: raise CalledProcessError on failure
       kwargs: Additional arguments to `subprocess.Popen`
@@ -722,8 +721,11 @@ def run(
       FileNotFoundError if the command could not be found
     """
     logq = queue.Queue()
-    if redacted_secrets is None and mask_envvars:
-        redacted_secrets = [val for val in os.environ.values() if val]
+    if isinstance(secrets, str):
+        # A single secret passed as a bare string: wrap it so it is redacted
+        # as a whole instead of being iterated character by character.
+        secrets = [secrets]
+    active_secrets = secrets
 
     def pushqueue(out, pipe):
         """Reads from a pipe and pushes into a queue, pushing "None" to
@@ -734,21 +736,18 @@ def run(
 
     def redact_secrets(arg: str) -> str:
         """Redacts secrets in **arg**"""
-        if redacted_secrets is None:
-            # caller has not considered masking, hide the entire command
-            # for security reasons
-            return "<hidden>"
-        if redacted_secrets is False:
-            # masking has been deactivated
-            return arg
-        if isinstance(redacted_secrets, list):
-            for mitem in redacted_secrets:
-                arg = arg.replace(mitem, "<hidden>")
+        if active_secrets:
+            for mitem in active_secrets:
+                if mitem:
+                    arg = arg.replace(mitem, "<hidden>")
         return arg
 
-    mylogger.log(
-        loglevel, "(COMMAND) %s", " ".join(redact_secrets(arg) for arg in cmds)
-    )
+    if isinstance(cmds, str):
+        log_cmd = redact_secrets(cmds)
+    else:
+        log_cmd = " ".join(redact_secrets(arg) for arg in cmds)
+
+    mylogger.log(loglevel, "(COMMAND) %s", log_cmd)
 
     # bufsize=4 result of manual experimentation. Changing it can
     # drop performance drastically.

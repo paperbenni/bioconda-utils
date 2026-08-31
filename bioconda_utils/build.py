@@ -70,12 +70,12 @@ def conda_build_purge() -> None:
     ``conda clean --all`` is called if we haveless than 300 MB free space
     on the current disk.
     """
-    utils.run(["conda", "build", "purge"], redacted_secrets=False)
+    utils.run(["conda", "build", "purge"])
 
     free_mb = utils.get_free_space()
     if free_mb < 300:
         logger.info("CLEANING UP PACKAGE CACHE (free space: %iMB).", free_mb)
-        utils.run(["conda", "clean", "--all"], redacted_secrets=False)
+        utils.run(["conda", "clean", "--all"])
         logger.info(
             "CLEANED UP PACKAGE CACHE (free space: %iMB).",
             utils.get_free_space(),
@@ -220,7 +220,7 @@ def build(
                     cmd += [config_file.arg, config_file.path]
                 cmd += [os.path.join(recipe, "meta.yaml")]
                 with utils.Progress():
-                    utils.run(cmd, redacted_secrets=False, live=live_logs)
+                    utils.run(cmd, live=live_logs)
 
         logger.info(
             "BUILD SUCCESS %s", " ".join(os.path.basename(p) for p in pkg_paths)
@@ -768,6 +768,6 @@ def report_resources(message: str, show_docker: bool = True) -> None:
     )
     if show_docker:
         cmd = ["docker", "system", "df"]
-        utils.run(cmd, redacted_secrets=False, live=True)
+        utils.run(cmd, live=True)
         cmd = ["docker", "ps", "-a"]
-        utils.run(cmd, redacted_secrets=False, live=True)
+        utils.run(cmd, live=True)

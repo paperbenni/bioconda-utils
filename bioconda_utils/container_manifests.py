@@ -215,10 +215,10 @@ def _is_index(manifest: dict[str, Any]) -> bool:
 
 
 def _inspect_raw(ref: str, creds: str | None) -> dict[str, Any] | None:
-    auth_args, redacted_secrets = skopeo_auth_args(creds, option="--creds")
+    auth_args, secrets = skopeo_auth_args(creds, option="--creds")
     result = utils.run(
         ["skopeo", "inspect", "--raw", *auth_args, f"docker://{ref}"],
-        redacted_secrets=redacted_secrets,
+        secrets=secrets,
         env=skopeo_env(),
         check=False,
         quiet_failure=True,
@@ -240,10 +240,10 @@ def _inspect_raw(ref: str, creds: str | None) -> dict[str, Any] | None:
 
 def _inspect_single_image(ref: str, creds: str | None) -> tuple[ContainerPlatform, str]:
     """Return the platform and digest of a non-index image ref."""
-    auth_args, redacted_secrets = skopeo_auth_args(creds, option="--creds")
+    auth_args, secrets = skopeo_auth_args(creds, option="--creds")
     raw = utils.run(
         ["skopeo", "inspect", "--no-tags", *auth_args, f"docker://{ref}"],
-        redacted_secrets=redacted_secrets,
+        secrets=secrets,
         env=skopeo_env(),
     ).stdout
     inspection = json.loads(raw)
@@ -297,7 +297,7 @@ def _docker_config_env(
     are preserved. The merged file is written to a tempdir that the caller must
     remove via ``_release_docker_config``.
 
-    Returns (env, redacted_secrets, tempdir). When creds is None, returns
+    Returns (env, secrets, tempdir). When creds is None, returns
     (None, None, None) so callers can fall back to the ambient
     ``~/.docker/config.json``.
     """
@@ -372,13 +372,11 @@ def _publish_manifest(
         "plain",
     ]
     command += ["--tag", canonical_ref, *sources]
-    docker_env, redacted_secrets, config_dir = _docker_config_env(canonical_ref, creds)
+    docker_env, secrets, config_dir = _docker_config_env(canonical_ref, creds)
     try:
         utils.run(
             command,
-            redacted_secrets=redacted_secrets
-            if redacted_secrets is not None
-            else False,
+            secrets=secrets,
             live=True,
             env={**os.environ, **(docker_env or {})},
         )

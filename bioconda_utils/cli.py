@@ -540,7 +540,7 @@ def build(
     if setup:
         logger.debug("Running setup: %s", setup)
         for cmd in setup:
-            utils.run(shlex.split(cmd), mask=False)
+            utils.run(shlex.split(cmd))
     recipes = get_recipes(cfg, recipe_folder, package_patterns, parsed_git_range)
     if docker:
         if build_script_template is not None:
@@ -867,14 +867,17 @@ def duplicates(
             if dry_run:
                 logger.info(" ".join([utils.bin_for("anaconda")] + subcmd))
             else:
-                token = os.environ.get("ANACONDA_TOKEN")
-                if token is None:
-                    token = []
+                token_val = os.environ.get("ANACONDA_TOKEN")
+                if token_val is None:
+                    token_args = []
+                    secrets = None
                 else:
-                    token = ["-t", token]
+                    token_args = ["-t", token_val]
+                    secrets = [token_val]
                 logger.info(
                     utils.run(
-                        [utils.bin_for("anaconda")] + token + subcmd, mask=token
+                        [utils.bin_for("anaconda")] + token_args + subcmd,
+                        secrets=secrets,
                     ).stdout
                 )
 

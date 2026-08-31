@@ -715,7 +715,7 @@ def test_publish_manifest_injects_docker_config_when_creds_provided(monkeypatch)
     def fake_run(command, **_kwargs):
         captured["command"] = command
         captured["env"] = _kwargs.get("env")
-        captured["redacted_secrets"] = _kwargs.get("redacted_secrets")
+        captured["secrets"] = _kwargs.get("secrets")
         captured["live"] = _kwargs.get("live")
         docker_config = _kwargs["env"]["DOCKER_CONFIG"]
         config_paths.append(Path(docker_config))
@@ -737,7 +737,7 @@ def test_publish_manifest_injects_docker_config_when_creds_provided(monkeypatch)
     config_path = config_paths[0]
     assert not config_path.exists(), "temp DOCKER_CONFIG should be removed"
 
-    assert captured["redacted_secrets"] == ["s3cret"]
+    assert captured["secrets"] == ["s3cret"]
     assert captured["live"] is True
     assert captured["env"]["DOCKER_CONFIG"]
 
@@ -811,7 +811,7 @@ def test_publish_manifest_without_creds_omits_docker_config(monkeypatch):
 
     def fake_run(command, **_kwargs):
         captured["env"] = _kwargs.get("env")
-        captured["redacted_secrets"] = _kwargs.get("redacted_secrets")
+        captured["secrets"] = _kwargs.get("secrets")
 
     monkeypatch.setattr(container_manifests.utils, "run", fake_run)
     descriptor = ManifestDescriptor(
@@ -825,7 +825,7 @@ def test_publish_manifest_without_creds_omits_docker_config(monkeypatch):
         [descriptor],
     )
 
-    assert captured["redacted_secrets"] is False
+    assert captured["secrets"] is None
     assert "DOCKER_CONFIG" not in captured["env"]
 
 

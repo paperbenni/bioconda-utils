@@ -1,11 +1,12 @@
 import json
+import logging
 import os
 import subprocess as sp
 from unittest.mock import Mock
 
 import pytest
 
-from bioconda_utils import _types, build, cli, docker_utils, pkg_test, upload
+from bioconda_utils import _types, build, cli, docker_utils, pkg_test, upload, utils
 from bioconda_utils._types import ContainerPlatform, PackageSubdir, PkgBuildRef
 
 SAMTOOLS_1_3_0 = PkgBuildRef(name="samtools", version="1.3", build_string="0")
@@ -642,3 +643,15 @@ def test_mulled_upload_sources_local_image_from_biocontainers(monkeypatch):
     )
 
     assert sources == ["docker-daemon:quay.io/biocontainers/samtools:1.3--0"]
+
+
+def test_utils_run_logs_and_redacts_secrets(caplog):
+    with caplog.at_level(logging.INFO):
+        utils.run(["echo", "hello", "world"])
+        assert "(COMMAND) echo hello world" in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        utils.run(["echo", "supersecret123", "public"], secrets=["supersecret123"])
+        assert "(COMMAND) echo <hidden> public" in caplog.text
+        assert "supersecret123" not in caplog.text

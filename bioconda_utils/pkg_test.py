@@ -278,7 +278,7 @@ fi
 
         logger.debug("Pre-solved mulled test command: %s", cmd)
         with utils.Progress():
-            p = utils.run(cmd, redacted_secrets=False, live=live_logs)
+            p = utils.run(cmd, live=live_logs)
         return p
 
 
@@ -453,6 +453,6 @@ def build_and_test_mulled_image(
     else:
         env["CONDA_IMAGE"] = conda_image
     with tempfile.TemporaryDirectory() as d, utils.Progress():
-        p = utils.run(cmd, env=env, cwd=d, redacted_secrets=False, live=live_logs)
+        p = utils.run(cmd, env=env, cwd=d, live=live_logs)
 
     return p

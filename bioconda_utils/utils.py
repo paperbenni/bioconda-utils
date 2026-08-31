@@ -685,7 +685,7 @@ def load_first_metadata(recipe, config=None, finalize=True):
 
 
 def run(
-    cmds: Sequence[str] | str,
+    cmds: list[str],
     env: dict[str, str] | None = None,
     secrets: Sequence[str] | None = None,
     live: bool = False,
@@ -742,10 +742,7 @@ def run(
                     arg = arg.replace(mitem, "<hidden>")
         return arg
 
-    if isinstance(cmds, str):
-        log_cmd = redact_secrets(cmds)
-    else:
-        log_cmd = " ".join(redact_secrets(arg) for arg in cmds)
+    log_cmd = " ".join(redact_secrets(arg) for arg in cmds)
 
     mylogger.log(loglevel, "(COMMAND) %s", log_cmd)
 
@@ -797,10 +794,7 @@ def run(
             handle_output(output_lines)
 
         output = "\n".join(output_lines)
-        if isinstance(cmds, str):
-            masked_cmds = redact_secrets(cmds)
-        else:
-            masked_cmds = [redact_secrets(c) for c in cmds]
+        masked_cmds = [redact_secrets(c) for c in cmds]
 
         if proc.poll() is None:
             mylogger.log(loglevel, "Command closed STDOUT/STDERR but is still running")

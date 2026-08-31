@@ -1610,6 +1610,14 @@ def create_mulled_manifests(
 ) -> None:
     """Create or update canonical manifests for uploaded mulled images."""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
+    try:
+        target_platforms = (
+            [package_subdir_to_container_platform(p) for p in platform]
+            if platform
+            else list(ALL_CONTAINER_PLATFORMS)
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--platform") from exc
     paths = record_paths or []
     if not paths:
         if not DEFAULT_MULLED_RECORDS_DIR.exists():
@@ -1625,14 +1633,6 @@ def create_mulled_manifests(
     if not records:
         logger.info("No mulled image records found; nothing to reconcile.")
         return
-    try:
-        target_platforms = (
-            [package_subdir_to_container_platform(p) for p in platform]
-            if platform
-            else list(ALL_CONTAINER_PLATFORMS)
-        )
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc), param_hint="--platform") from exc
     changed, total = reconcile_manifests(
         records,
         target_platforms,

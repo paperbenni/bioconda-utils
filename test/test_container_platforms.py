@@ -616,3 +616,17 @@ def test_utils_run_logs_and_redacts_secrets(caplog):
         utils.run(["echo", "supersecret123", "public"], secrets=["supersecret123"])
         assert "(COMMAND) echo <hidden> public" in caplog.text
         assert "supersecret123" not in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        # A bare string is a single secret, not a sequence of characters
+        utils.run(["echo", "supersecret123", "public"], secrets="supersecret123")
+        assert "(COMMAND) echo <hidden> public" in caplog.text
+        assert "supersecret123" not in caplog.text
+
+
+def test_utils_run_rejects_removed_redacted_secrets_kwarg():
+    # The pre-`secrets` kwarg is gone; unknown kwargs are forwarded to Popen,
+    # which rejects it instead of silently skipping redaction.
+    with pytest.raises(TypeError):
+        utils.run(["echo", "hello"], redacted_secrets=["s3cret"])

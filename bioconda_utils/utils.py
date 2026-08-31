@@ -693,8 +693,6 @@ def run(
     loglevel: int = logging.INFO,
     check: bool = True,
     quiet_failure: bool = False,
-    *,
-    redacted_secrets: Sequence[str] | bool | None = None,
     **kwargs: Any,
 ) -> sp.CompletedProcess:
     """
@@ -709,7 +707,8 @@ def run(
     Arguments:
       cmds: List of command and arguments
       env: Optional environment for command, if None, use environment of the parent process
-      secrets: Optional sequence of terms to redact (secrets) from logs and output
+      secrets: Optional sequence of terms to redact (secrets) from logs and
+        output. A single term may be passed as a bare string.
       live: Whether output should be sent to log
       check: raise CalledProcessError on failure
       kwargs: Additional arguments to `subprocess.Popen`
@@ -722,9 +721,11 @@ def run(
       FileNotFoundError if the command could not be found
     """
     logq = queue.Queue()
+    if isinstance(secrets, str):
+        # A single secret passed as a bare string: wrap it so it is redacted
+        # as a whole instead of being iterated character by character.
+        secrets = [secrets]
     active_secrets = secrets
-    if active_secrets is None and isinstance(redacted_secrets, (list, tuple, set)):
-        active_secrets = list(redacted_secrets)
 
     def pushqueue(out, pipe):
         """Reads from a pipe and pushes into a queue, pushing "None" to

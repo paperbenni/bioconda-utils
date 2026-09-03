@@ -1,7 +1,7 @@
 [workspace]
 name = "bioconda-utils"
 version = "0.0.0"
-platforms = ["linux-64", "osx-64"]
+platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
 channels = ["conda-forge", "bioconda"]
 
 [dependencies]
@@ -83,6 +83,13 @@ tabulate = "0.10.*"
 
 # resource reporting for builds
 psutil = "*"
+
+# macOS-only: provides run_conda_forge_build_setup (SDK/compiler setup),
+# previously pulled in by install-and-set-up-conda.sh on Darwin runners
+[target.osx-64.dependencies]
+conda-forge-ci-setup = "*"
+[target.osx-arm64.dependencies]
+conda-forge-ci-setup = "*"
 
 [feature.test.dependencies]
 pip = "*"

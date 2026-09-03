@@ -590,6 +590,27 @@ class RecipeBuilder:
             "-v",
             f"{recipe_dir}:{self.container_recipe}",
         ]
+        # Optionally persist the container's conda package cache (repodata,
+        # shards indexes, downloaded packages) across the containers of one
+        # build run. Containers are ephemeral (--rm); without this, every
+        # recipe re-downloads repodata and its build/host env packages.
+        # The directory must be writable by the container user.
+        pkgs_cache = os.environ.get("BIOCONDA_UTILS_CONTAINER_PKGS_CACHE")
+        if pkgs_cache:
+            try:
+                os.makedirs(pkgs_cache, exist_ok=True)
+                os.chmod(pkgs_cache, 0o777)
+            except OSError as exc:
+                logger.warning(
+                    "Cannot prepare container package cache dir %s: %s",
+                    pkgs_cache,
+                    exc,
+                )
+            else:
+                cmd += [
+                    "-v",
+                    f"{pkgs_cache}:/opt/conda/pkgs",
+                ]
         cmd += env_list
         image = self.docker_temp_image if self.build_image else self.docker_base_image
         if image is None:

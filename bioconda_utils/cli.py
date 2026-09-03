@@ -521,13 +521,21 @@ def build(
             help="Number of levels of root nodes to skip. (Optional, and only if using n_workers)",
         ),
     ] = None,
+    threads: ThreadsOpt = 16,
+    repodata_cache: Annotated[
+        str | None,
+        typer.Option(
+            "--repodata-cache",
+            help="To speed up startup, use repodata cached locally in\n     the provided filename. If the file does not exist, it will be created the\n     first time. The cache is refreshed when it is older than 8 hours.",
+        ),
+    ] = None,
     loglevel: LoglevelOpt = "info",
     logfile: LogfileOpt = None,
     logfile_level: LogfileLevelOpt = "debug",
     log_command_max_lines: LogCommandMaxLinesOpt = None,
 ) -> None:
     """Build and test Bioconda recipes."""
-    _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
+    _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines, threads)
     target_platform = _container_platform_for_build(platform, docker)
     parsed_upload_target = _parse_quay_upload_target(container_upload_target)
     image_records_dir = _resolve_image_records_dir(
@@ -536,6 +544,8 @@ def build(
     package_patterns: PackagePatterns = packages or ["*"]
     parsed_git_range = _parse_git_range_if_needed(git_range)
     cfg = utils.load_config(config)
+    if repodata_cache is not None:
+        utils.RepoData().set_cache(repodata_cache)
     setup = cfg.get("setup", None)
     if setup:
         logger.debug("Running setup: %s", setup)

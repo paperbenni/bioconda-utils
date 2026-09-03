@@ -510,6 +510,17 @@ def build(
     ] = False,
     image_records_dir: ImageRecordsDirOpt = None,
     use_existing_auth: UseExistingAuthOpt = False,
+    container_pkgs_cache: Annotated[
+        Path | None,
+        typer.Option(
+            "--container-pkgs-cache",
+            help="Host directory bind-mounted at /opt/conda/pkgs in build "
+            "containers (--docker) so repodata, shards indexes and "
+            "downloaded build/host env packages persist across the "
+            "containers of one build run. Falls back to the "
+            "BIOCONDA_UTILS_CONTAINER_PKGS_CACHE environment variable.",
+        ),
+    ] = None,
     exclude: Annotated[
         list[str] | None,
         typer.Option("--exclude", help="Packages to exclude during this run"),
@@ -582,6 +593,9 @@ def build(
             build_image=build_image,
             docker_base_image=docker_base_image,
             target_platform=target_platform,
+            container_pkgs_cache=(
+                str(container_pkgs_cache) if container_pkgs_cache else None
+            ),
         )
     else:
         docker_builder = None

@@ -332,6 +332,22 @@ def root(
     """Bioconda Utils command-line interface."""
 
 
+@app.command("diagnostics")
+def diagnostics() -> None:
+    """Print details about the active Bioconda build environment."""
+    config = utils.load_conda_build_config()
+
+    typer.echo(f"bioconda-utils version: {VERSION}")
+    typer.echo(f"package subdir: {config.subdir}")
+    typer.echo(f"conda-build root: {config.croot}")
+    typer.echo("conda-build configuration files:")
+    for filename in config.exclusive_config_files or []:
+        path = Path(filename)
+        typer.echo(f"{path}:")
+        contents = path.read_text(encoding="utf-8")
+        typer.echo(contents, nl=not contents.endswith("\n"))
+
+
 @app.command("build")
 def build(
     recipe_folder: Annotated[

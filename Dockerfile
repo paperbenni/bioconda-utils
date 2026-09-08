@@ -30,7 +30,8 @@ RUN . /opt/conda/etc/profile.d/conda.sh && \
     { conda config --remove repodata_fns current_repodata.json 2> /dev/null || true ; } && \
     conda config --prepend repodata_fns repodata.json && \
     conda config --set channel_priority strict && \
-    conda config --set auto_update_conda False
+    conda config --set auto_update_conda False && \
+    conda config --set local_repodata_ttl 3600
 
 FROM base as build
 WORKDIR /tmp/repo

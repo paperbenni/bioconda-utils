@@ -1259,7 +1259,186 @@ def test_repodata_refreshes_disk_cache_older_than_one_day(monkeypatch, tmp_path)
     assert list(repodata.df["name"]) == ["fresh"]
 
 
+def test_repodata_shards_get_package_data_by_name(monkeypatch):
+    monkeypatch.setattr(utils.RepoData, "config", {"channels": ["bioconda"]})
+    repodata = utils.RepoData()
+    monkeypatch.setattr(repodata, "_df", None)
+    monkeypatch.setattr(repodata, "cache_file", None)
+    monkeypatch.setattr(repodata, "use_shards", True)
+    monkeypatch.setattr(repodata, "platforms", [PackageSubdir.LINUX_64])
+
+    shard_idx = utils._CachedShardIndex(
+        shards={"pkg-a": "0123456789abcdef"},
+        base_url="",
+        shards_base_url="",
+        fetched_at=datetime.datetime.now(datetime.UTC),
+    )
+    monkeypatch.setattr(
+        repodata,
+        "_get_shard_indexes",
+        lambda repos: {("bioconda", PackageSubdir.LINUX_64): shard_idx},
+    )
+
+    fetch_calls = []
+
+    def mock_fetch(urls, descs, cb, datas, allow_404=False):
+        fetch_calls.append((urls, datas))
+        return [
+            [
+                {
+                    "name": "pkg-a",
+                    "version": "1.0",
+                    "build": "h123_0",
+                    "build_number": 0,
+                    "depends": [],
+                    "channel": "bioconda",
+                    "platform": PackageSubdir.LINUX_64,
+                    "subdir": PackageSubdir.LINUX_64,
+                }
+            ]
+        ]
+
+    monkeypatch.setattr(utils.AsyncRequests, "fetch", mock_fetch)
+
+    # 1. Existence check
+    assert (
+        repodata.get_package_data(name="pkg-a", platform=PackageSubdir.LINUX_64) is True
+    )
+    assert len(fetch_calls) == 1
+
+    # 2. Version lookup
+    assert repodata.get_package_data(
+        "version", name="pkg-a", platform=PackageSubdir.LINUX_64
+    ) == ["1.0"]
+
+    # 3. Tuple lookup
+    records = list(
+        repodata.get_package_data(
+            ["subdir", "build"], name="pkg-a", platform=PackageSubdir.LINUX_64
+        )
+    )
+    assert len(records) == 1
+    assert records[0].subdir == PackageSubdir.LINUX_64
+    assert records[0].build == "h123_0"
+
+    # 4. Non-existent package: should not fetch shard
+    fetch_calls.clear()
+    assert (
+        repodata.get_package_data(name="pkg-b", platform=PackageSubdir.LINUX_64)
+        is False
+    )
+    assert len(fetch_calls) == 0
+
+
+def test_repodata_shards_get_package_names(monkeypatch):
+    monkeypatch.setattr(utils.RepoData, "config", {"channels": ["bioconda"]})
+    repodata = utils.RepoData()
+    monkeypatch.setattr(repodata, "_df", None)
+    monkeypatch.setattr(repodata, "cache_file", None)
+    monkeypatch.setattr(repodata, "use_shards", True)
+    monkeypatch.setattr(repodata, "platforms", [PackageSubdir.LINUX_64])
+
+    shard_idx = utils._CachedShardIndex(
+        shards={"pkg-a": "hash1", "pkg-b": "hash2"},
+        base_url="",
+        shards_base_url="",
+        fetched_at=datetime.datetime.now(datetime.UTC),
+    )
+    monkeypatch.setattr(
+        repodata,
+        "_get_shard_indexes",
+        lambda repos: {("bioconda", PackageSubdir.LINUX_64): shard_idx},
+    )
+
+    names = repodata.get_package_data(
+        "name", channels="bioconda", platform=PackageSubdir.LINUX_64
+    )
+    assert set(names) == {"pkg-a", "pkg-b"}
+
+
+def test_repodata_shards_get_versions(monkeypatch):
+    monkeypatch.setattr(utils.RepoData, "config", {"channels": ["bioconda"]})
+    repodata = utils.RepoData()
+    monkeypatch.setattr(repodata, "_df", None)
+    monkeypatch.setattr(repodata, "cache_file", None)
+    monkeypatch.setattr(repodata, "use_shards", True)
+    monkeypatch.setattr(repodata, "platforms", [PackageSubdir.LINUX_64])
+
+    shard_idx = utils._CachedShardIndex(
+        shards={"pkg-a": "hash1"},
+        base_url="",
+        shards_base_url="",
+        fetched_at=datetime.datetime.now(datetime.UTC),
+    )
+    monkeypatch.setattr(
+        repodata,
+        "_get_shard_indexes",
+        lambda repos: {("bioconda", PackageSubdir.LINUX_64): shard_idx},
+    )
+
+    def mock_fetch(urls, descs, cb, datas, allow_404=False):
+        return [
+            [
+                {
+                    "name": "pkg-a",
+                    "version": "1.0",
+                    "build": "0",
+                    "build_number": 0,
+                    "depends": [],
+                    "channel": "bioconda",
+                    "platform": PackageSubdir.LINUX_64,
+                    "subdir": PackageSubdir.LINUX_64,
+                }
+            ]
+        ]
+
+    monkeypatch.setattr(utils.AsyncRequests, "fetch", mock_fetch)
+    versions = repodata.get_versions("pkg-a")
+    assert versions == {"1.0": [PackageSubdir.LINUX_64]}
+
+
+def test_repodata_shards_fallback_on_unsharded(monkeypatch):
+    monkeypatch.setattr(utils.RepoData, "config", {"channels": ["bioconda"]})
+    repodata = utils.RepoData()
+    monkeypatch.setattr(repodata, "_df", None)
+    monkeypatch.setattr(repodata, "cache_file", None)
+    monkeypatch.setattr(repodata, "use_shards", True)
+    monkeypatch.setattr(repodata, "platforms", [PackageSubdir.LINUX_64])
+    monkeypatch.setattr(
+        repodata,
+        "_shards_unavailable",
+        {("bioconda", PackageSubdir.LINUX_64)},
+    )
+    fallback_called = []
+
+    def mock_repo_df(channels, subdirs):
+        fallback_called.append((tuple(channels), tuple(subdirs)))
+        return pd.DataFrame(
+            [
+                {
+                    "name": "pkg-a",
+                    "version": "1.0",
+                    "build": "0",
+                    "build_number": 0,
+                    "depends": [],
+                    "channel": "bioconda",
+                    "platform": PackageSubdir.LINUX_64,
+                    "subdir": PackageSubdir.LINUX_64,
+                }
+            ],
+            columns=utils.RepoData.columns,
+        )
+
+    monkeypatch.setattr(repodata, "_get_repository_dataframe", mock_repo_df)
+
+    assert repodata.get_package_data(
+        "version", name="pkg-a", platform=PackageSubdir.LINUX_64
+    ) == ["1.0"]
+    assert fallback_called == [(("bioconda",), (PackageSubdir.LINUX_64,))]
+
+
 def test_filter_existing_packages_queries_rendered_target_subdir(monkeypatch):
+    monkeypatch.setattr(utils.RepoData, "config", {"channels": ["bioconda"]})
     meta = Mock()
     meta.name.return_value = "samtools"
     meta.version.return_value = "1.24"

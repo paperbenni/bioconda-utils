@@ -41,12 +41,14 @@ import backoff
 import conda.gateways.logging
 import diskcache
 import jinja2
+import msgpack
 import pandas as pd
 import platformdirs
 import psutil
 import requests
 import tqdm as _tqdm
 import yaml
+import zstandard
 from boltons.funcutils import FunctionBuilder
 from colorlog import ColoredFormatter
 from conda_build import api
@@ -83,6 +85,20 @@ RepoDataKey: TypeAlias = tuple[str, Subdir]
 @dataclass
 class _CachedRepoData:
     dataframe: pd.DataFrame
+    fetched_at: datetime.datetime
+
+
+@dataclass
+class _CachedShardIndex:
+    shards: dict[str, str]
+    base_url: str
+    shards_base_url: str
+    fetched_at: datetime.datetime
+
+
+@dataclass
+class _CachedPackageShard:
+    records: list[dict[str, Any]]
     fetched_at: datetime.datetime
 
 
@@ -1277,7 +1293,7 @@ class AsyncRequests:
     CONNECTIONS_PER_HOST = 4
 
     @classmethod
-    def fetch(cls, urls, descs, cb, datas):
+    def fetch(cls, urls, descs, cb, datas, allow_404=False):
         """Fetch data from URLs.
 
         This will use asyncio to manage a pool of connections at once, speeding
@@ -1290,6 +1306,7 @@ class AsyncRequests:
           descs: Matching list of descriptions (for progress display)
           cb: As each download is completed, data is passed through this function.
               Use to e.g. offload json parsing into download loop.
+          allow_404: If True, 404 responses return None instead of raising ClientResponseError.
         """
         try:
             loop = asyncio.get_event_loop()
@@ -1302,10 +1319,12 @@ class AsyncRequests:
             # Workaround the fact that asyncio's loop is marked as not-reentrant
             # (it is apparently easy to patch, but not desired by the devs,
             with ThreadPool(1) as pool:
-                res = pool.apply(cls.fetch, (urls, descs, cb, datas))
+                res = pool.apply(cls.fetch, (urls, descs, cb, datas, allow_404))
             return res
 
-        task = asyncio.ensure_future(cls.async_fetch(urls, descs, cb, datas))
+        task = asyncio.ensure_future(
+            cls.async_fetch(urls, descs, cb, datas, allow_404=allow_404)
+        )
 
         try:
             loop.run_until_complete(task)
@@ -1317,7 +1336,9 @@ class AsyncRequests:
         return task.result()
 
     @classmethod
-    async def async_fetch(cls, urls, descs=None, cb=None, datas=None, fds=None):
+    async def async_fetch(
+        cls, urls, descs=None, cb=None, datas=None, fds=None, allow_404=False
+    ):
         if descs is None:
             descs = []
         if datas is None:
@@ -1332,7 +1353,9 @@ class AsyncRequests:
         ) as session:
             coros = [
                 asyncio.ensure_future(
-                    cls._async_fetch_one(session, url, desc, cb, data, fd)
+                    cls._async_fetch_one(
+                        session, url, desc, cb, data, fd, allow_404=allow_404
+                    )
                 )
                 for url, desc, data, fd in zip_longest(urls, descs, datas, fds)
             ]
@@ -1355,12 +1378,16 @@ class AsyncRequests:
             and ex.status not in [429, 502, 503, 504]
         ),
     )
-    async def _async_fetch_one(session, url, desc, cb=None, data=None, fd=None):
+    async def _async_fetch_one(
+        session, url, desc, cb=None, data=None, fd=None, allow_404=False
+    ):
         result = []
         if url.startswith("file://"):
             if os.path.exists(url[7:]):
                 async with aiofiles.open(url[7:], mode="rb") as f:
                     result.append(await f.read())
+            elif allow_404:
+                return cb(None, data) if cb else None
             else:
                 subdir = url.split("/")[-2]
                 d = {
@@ -1373,6 +1400,8 @@ class AsyncRequests:
                 result.append(json.dumps(d).encode("UTF-8"))
         else:
             async with session.get(url, timeout=None) as resp:
+                if allow_404 and resp.status == 404:
+                    return cb(None, data) if cb else None
                 resp.raise_for_status()
                 size = int(resp.headers.get("Content-Length", 0))
                 with tqdm(
@@ -1471,6 +1500,15 @@ class RepoData:
     _df_ts = None
     _repository_cache: ClassVar[dict[RepoDataKey, _CachedRepoData]] = {}
 
+    use_shards: ClassVar[bool] = os.environ.get(
+        "BIOCONDA_UTILS_USE_SHARDS", "true"
+    ).lower() in ("true", "1")
+    _shard_index_cache: ClassVar[dict[RepoDataKey, _CachedShardIndex]] = {}
+    _package_shard_cache: ClassVar[
+        dict[tuple[str, Subdir, str], _CachedPackageShard]
+    ] = {}
+    _shards_unavailable: ClassVar[set[RepoDataKey]] = set()
+
     #: default lifetime for repodata cache
     cache_timeout = 60 * 60 * 8
 
@@ -1481,6 +1519,10 @@ class RepoData:
         if previous_channels != current_channels:
             cls._df = None
             cls._df_ts = None
+            cls._repository_cache.clear()
+            cls._shard_index_cache.clear()
+            cls._package_shard_cache.clear()
+            cls._shards_unavailable.clear()
         cls.config = config
 
     __instance = None
@@ -1608,11 +1650,259 @@ class RepoData:
 
         return res
 
+    def _is_loader_mocked(self) -> bool:
+        loader = getattr(self, "_load_channel_dataframe", None)
+        if loader is None:
+            return False
+        return getattr(loader, "__func__", loader) != RepoData._load_channel_dataframe
+
+    def _make_repodata_dir_url(self, channel: str, subdir: Subdir) -> str:
+        if channel == "defaults":
+            return f"https://repo.anaconda.com/pkgs/main/{subdir}/"
+        elif channel.startswith("file://"):
+            return f"{channel}/{subdir}/"
+        else:
+            return f"https://conda.anaconda.org/{channel}/{subdir}/"
+
+    def _make_shards_index_url(self, channel: str, subdir: Subdir) -> str:
+        return (
+            f"{self._make_repodata_dir_url(channel, subdir)}repodata_shards.msgpack.zst"
+        )
+
+    def _make_shard_url(
+        self,
+        channel: str,
+        subdir: Subdir,
+        shard_index: _CachedShardIndex,
+        hex_hash: str,
+    ) -> str:
+        base_dir_url = self._make_repodata_dir_url(channel, subdir)
+        shards_base = shard_index.shards_base_url
+        if shards_base:
+            if not shards_base.endswith("/"):
+                shards_base += "/"
+            if shards_base.startswith(("http://", "https://", "file://")):
+                base_dir_url = shards_base
+            else:
+                base_dir_url = base_dir_url + shards_base
+        return f"{base_dir_url}{hex_hash}.msgpack.zst"
+
+    @staticmethod
+    def _parse_shard_index(
+        data: bytes | None, repo_meta: RepoDataKey
+    ) -> _CachedShardIndex | None:
+        if not data:
+            return None
+        channel, subdir = repo_meta
+        dctx = zstandard.ZstdDecompressor()
+        try:
+            decompressed = dctx.stream_reader(data).read()
+            raw = msgpack.unpackb(decompressed)
+        except (
+            zstandard.ZstdError,
+            msgpack.UnpackException,
+            ValueError,
+            KeyError,
+            TypeError,
+            OSError,
+        ) as exc:
+            logger.debug(
+                "Failed to decompress/unpack shards index for %s/%s: %s",
+                channel,
+                subdir,
+                exc,
+            )
+            return None
+
+        raw_shards = raw.get("shards", {})
+        shards_map: dict[str, str] = {}
+        for pkg_name, hash_val in raw_shards.items():
+            if isinstance(hash_val, bytes):
+                shards_map[pkg_name] = hash_val.hex()
+            else:
+                shards_map[pkg_name] = str(hash_val)
+
+        info = raw.get("info", {})
+        base_url = info.get("base_url", "")
+        shards_base_url = info.get("shards_base_url", "")
+
+        return _CachedShardIndex(
+            shards=shards_map,
+            base_url=base_url,
+            shards_base_url=shards_base_url,
+            fetched_at=datetime.datetime.now(datetime.UTC),
+        )
+
+    @classmethod
+    def _parse_package_shard(
+        cls,
+        data: bytes | None,
+        meta_data: tuple[str, Subdir, str],
+    ) -> list[dict[str, Any]]:
+        if not data:
+            return []
+        channel, subdir, package_name = meta_data
+        dctx = zstandard.ZstdDecompressor()
+        try:
+            decompressed = dctx.stream_reader(data).read()
+            shard = msgpack.unpackb(decompressed)
+        except (
+            zstandard.ZstdError,
+            msgpack.UnpackException,
+            ValueError,
+            KeyError,
+            TypeError,
+            OSError,
+        ) as exc:
+            logger.debug(
+                "Failed to decompress/unpack shard for %s/%s/%s: %s",
+                channel,
+                subdir,
+                package_name,
+                exc,
+            )
+            return []
+
+        packages = dict(shard.get("packages", {}))
+        packages.update(shard.get("packages.conda", {}))
+
+        records: list[dict[str, Any]] = []
+        for raw_record in packages.values():
+            rec = {
+                "name": raw_record.get("name", package_name),
+                "version": str(raw_record.get("version", "")),
+                "build": raw_record.get("build", ""),
+                "build_number": int(raw_record.get("build_number", 0)),
+                "depends": list(raw_record.get("depends", [])),
+                "channel": channel,
+                "platform": subdir,
+                "subdir": raw_record.get("subdir", subdir),
+            }
+            records.append(rec)
+        return records
+
+    def _get_shard_indexes(
+        self, repositories: Iterable[RepoDataKey]
+    ) -> dict[RepoDataKey, _CachedShardIndex]:
+        now = datetime.datetime.now(datetime.UTC)
+        result: dict[RepoDataKey, _CachedShardIndex] = {}
+        missing: list[RepoDataKey] = []
+
+        for repo in repositories:
+            if repo in self._shards_unavailable:
+                continue
+            if repo in self._shard_index_cache:
+                cached = self._shard_index_cache[repo]
+                if (now - cached.fetched_at).total_seconds() <= self.cache_timeout:
+                    result[repo] = cached
+                    continue
+                del self._shard_index_cache[repo]
+            missing.append(repo)
+
+        if missing:
+            urls = [self._make_shards_index_url(c, s) for c, s in missing]
+            descs = [f"{c}/{s} shards index" for c, s in missing]
+            try:
+                indexes = AsyncRequests.fetch(
+                    urls,
+                    descs,
+                    cb=self._parse_shard_index,
+                    datas=missing,
+                    allow_404=True,
+                )
+                for repo, index in zip(missing, indexes):
+                    if index is not None:
+                        self._shard_index_cache[repo] = index
+                        result[repo] = index
+                    else:
+                        self._shards_unavailable.add(repo)
+            except (aiohttp.ClientError, OSError, TimeoutError, RuntimeError) as exc:
+                logger.debug("Error batch fetching shard indexes: %s", exc)
+                for repo in missing:
+                    self._shards_unavailable.add(repo)
+
+        return result
+
+    def _get_sharded_package_data(
+        self,
+        requested_channels: Sequence[str],
+        requested_subdirs: Sequence[Subdir],
+        package_names: Collection[str],
+    ) -> list[dict[str, Any]]:
+        repositories = tuple(product(requested_channels, requested_subdirs))
+        shard_indexes = self._get_shard_indexes(repositories)
+        now = datetime.datetime.now(datetime.UTC)
+
+        all_records: list[dict[str, Any]] = []
+        to_fetch_urls: list[str] = []
+        to_fetch_descs: list[str] = []
+        to_fetch_metadata: list[tuple[str, Subdir, str]] = []
+
+        unsharded_repos: list[RepoDataKey] = []
+
+        for repo in repositories:
+            channel, subdir = repo
+            shard_index = shard_indexes.get(repo)
+            if shard_index is None:
+                unsharded_repos.append(repo)
+                continue
+
+            for pkg_name in package_names:
+                if pkg_name not in shard_index.shards:
+                    continue
+                cache_key = (channel, subdir, pkg_name)
+                if cache_key in self._package_shard_cache:
+                    cached = self._package_shard_cache[cache_key]
+                    if (now - cached.fetched_at).total_seconds() <= self.cache_timeout:
+                        all_records.extend(cached.records)
+                        continue
+                    del self._package_shard_cache[cache_key]
+
+                hex_hash = shard_index.shards[pkg_name]
+                url = self._make_shard_url(channel, subdir, shard_index, hex_hash)
+                to_fetch_urls.append(url)
+                to_fetch_descs.append(f"{channel}/{subdir}/{pkg_name} shard")
+                to_fetch_metadata.append((channel, subdir, pkg_name))
+
+        if to_fetch_urls:
+            try:
+                fetched_shards = AsyncRequests.fetch(
+                    to_fetch_urls,
+                    to_fetch_descs,
+                    cb=self._parse_package_shard,
+                    datas=to_fetch_metadata,
+                    allow_404=True,
+                )
+                for meta, records in zip(to_fetch_metadata, fetched_shards):
+                    channel, subdir, pkg_name = meta
+                    recs = records or []
+                    self._package_shard_cache[(channel, subdir, pkg_name)] = (
+                        _CachedPackageShard(
+                            records=recs,
+                            fetched_at=now,
+                        )
+                    )
+                    all_records.extend(recs)
+            except (aiohttp.ClientError, OSError, TimeoutError, RuntimeError) as exc:
+                logger.debug("Error fetching package shards: %s", exc)
+
+        if unsharded_repos:
+            unsharded_channels = list(dict.fromkeys(r[0] for r in unsharded_repos))
+            unsharded_subdirs = list(dict.fromkeys(r[1] for r in unsharded_repos))
+            df = self._get_repository_dataframe(unsharded_channels, unsharded_subdirs)
+            df_filtered = df[df["name"].isin(package_names)]
+            if not df_filtered.empty:
+                all_records.extend(df_filtered.to_dict("records"))
+
+        return all_records
+
     def _get_repository_dataframe(
         self, channels: Iterable[str], subdirs: Iterable[Subdir]
     ) -> pd.DataFrame:
         """Load and cache only the requested channel/subdirectory pairs."""
-        if self._df is not None or self.cache_file is not None:
+        if self._df is not None or (
+            self.cache_file is not None and os.path.exists(self.cache_file)
+        ):
             return self.df
 
         configured_channels = set(self.channels)
@@ -1668,7 +1958,37 @@ class RepoData:
           e.g. {'0.1': ['linux-64'], '0.2': ['linux-64', 'osx-64'], '0.3': ['noarch']}
         """
         # called from doc generator
-        packages = self.df[self.df.name == name][["version", "platform"]]
+        can_use_shards = (
+            self.use_shards
+            and not self._is_loader_mocked()
+            and self._df is None
+            and not (self.cache_file is not None and os.path.exists(self.cache_file))
+        )
+        if can_use_shards:
+            records = self._get_sharded_package_data(
+                self.channels, self.platforms, [name]
+            )
+            df = (
+                pd.DataFrame(records, columns=self.columns)
+                if records
+                else pd.DataFrame(columns=self.columns)
+            )
+            for col in (
+                "channel",
+                "platform",
+                "subdir",
+                "name",
+                "version",
+                "build",
+            ):
+                df[col] = df[col].astype("category")
+            df = df.reset_index(drop=True)
+            packages = df[df.name == name][["version", "platform"]].copy()
+        else:
+            packages = self.df[self.df.name == name][["version", "platform"]].copy()
+
+        packages["platform"] = packages["platform"].astype(str)
+        packages["version"] = packages["version"].astype(str)
         versions = packages.groupby("version", observed=True).agg(
             lambda x: list(set(x))
         )
@@ -1711,7 +2031,87 @@ class RepoData:
         else:
             requested_subdirs = [cast(Subdir, subdir) for subdir in platform]
 
-        df = self._get_repository_dataframe(requested_channels, requested_subdirs)
+        configured_channels = set(self.channels)
+        requested_channels = [
+            c for c in dict.fromkeys(requested_channels) if c in configured_channels
+        ]
+        if not requested_channels or not requested_subdirs:
+            if key is None:
+                return False
+            if isinstance(key, str):
+                return []
+            return iter([])
+
+        can_use_shards = (
+            self.use_shards
+            and not self._is_loader_mocked()
+            and self._df is None
+            and not (self.cache_file is not None and os.path.exists(self.cache_file))
+        )
+
+        if (
+            can_use_shards
+            and key == "name"
+            and version is None
+            and build_number is None
+            and build is None
+        ):
+            repositories = tuple(product(requested_channels, requested_subdirs))
+            shard_indexes = self._get_shard_indexes(repositories)
+            names: list[str] = []
+            unsharded_repos: list[RepoDataKey] = []
+            target_names = (
+                set([name] if isinstance(name, str) else name)
+                if name is not None
+                else None
+            )
+
+            for repo in repositories:
+                if repo in shard_indexes:
+                    if target_names is not None:
+                        names.extend(
+                            n for n in shard_indexes[repo].shards if n in target_names
+                        )
+                    else:
+                        names.extend(shard_indexes[repo].shards.keys())
+                else:
+                    unsharded_repos.append(repo)
+
+            if unsharded_repos:
+                unsharded_channels = list(dict.fromkeys(r[0] for r in unsharded_repos))
+                unsharded_subdirs = list(dict.fromkeys(r[1] for r in unsharded_repos))
+                df_unsharded = self._get_repository_dataframe(
+                    unsharded_channels, unsharded_subdirs
+                )
+                if target_names is not None:
+                    df_unsharded = df_unsharded[df_unsharded["name"].isin(target_names)]
+                names.extend(df_unsharded["name"])
+
+            return names
+
+        if can_use_shards and name is not None:
+            target_names = [name] if isinstance(name, str) else list(name)
+            records = self._get_sharded_package_data(
+                requested_channels, requested_subdirs, target_names
+            )
+            df = (
+                pd.DataFrame(records, columns=self.columns)
+                if records
+                else pd.DataFrame(columns=self.columns)
+            )
+            for col in (
+                "channel",
+                "platform",
+                "subdir",
+                "name",
+                "version",
+                "build",
+            ):
+                df[col] = df[col].astype("category")
+            df = df.reset_index(drop=True)
+        else:
+            df = self._get_repository_dataframe(requested_channels, requested_subdirs)
+
         channel_filter = requested_channels if channels is not None else None
         platform_filter = requested_subdirs if platform is not None else None
         # We iteratively drill down here, starting with the (probably)

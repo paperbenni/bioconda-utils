@@ -15,8 +15,10 @@ from pathlib import Path
 from textwrap import dedent
 from unittest.mock import Mock
 
+import msgpack
 import pandas as pd
 import pytest
+import zstandard
 from conda_build import api, exceptions, metadata
 from helpers import Recipes, ensure_missing
 from jsonschema import ValidationError
@@ -44,9 +46,14 @@ TEST_LABEL = "bioconda-utils-test"
 # any tests that depend on a fixture that uses PARAMS will run twice (once with
 # docker, once without). On OSX, only the non-docker runs.
 
-# Docker ref for build container
+# Docker ref for build container. This must be a pushed, public image so fresh
+# clones can `docker pull` it. (The `...-test-env-...` tag used here
+# historically never existed remotely; CI only ever built it locally via
+# `docker build -f ./Dockerfile.test`, which failed for everyone else with a
+# cryptic 401.) To test local Dockerfile changes, build the tag locally first:
+# `docker build -t quay.io/bioconda/bioconda-utils-build-env-cos7:latest ./`
 BUILD_ENV_IMAGE = os.getenv(
-    "BUILD_ENV_IMAGE", "quay.io/bioconda/bioconda-utils-test-env-cos7:latest"
+    "BUILD_ENV_IMAGE", "quay.io/bioconda/bioconda-utils-build-env-cos7:latest"
 )
 
 SKIP_DOCKER_TESTS = sys.platform.startswith("darwin")
@@ -1305,6 +1312,52 @@ def test_async_requests_preserves_request_order(monkeypatch):
     assert result == ["first", "second"]
 
 
+def _pack_shard(data):
+    return zstandard.ZstdCompressor().compress(msgpack.packb(data))
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        [],
+        {},
+        {"version": 2, "info": {}, "shards": {}},
+        {"version": 1, "info": {}, "shards": None},
+        {"version": 1, "info": {}, "shards": {"pkg": {}}},
+    ],
+)
+def test_repodata_rejects_invalid_shard_indexes(data):
+    assert (
+        utils.RepoData._parse_shard_index(
+            _pack_shard(data), ("bioconda", PackageSubdir.LINUX_64)
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        [],
+        {},
+        {"packages": None, "packages.conda": {}},
+        {"packages": {"pkg-1-0.tar.bz2": []}, "packages.conda": {}},
+        {
+            "packages": {"pkg-1-0.tar.bz2": {"depends": None}},
+            "packages.conda": {},
+        },
+    ],
+)
+def test_repodata_rejects_invalid_package_shards(data):
+    assert (
+        utils.RepoData._parse_package_shard(
+            _pack_shard(data),
+            ("bioconda", PackageSubdir.LINUX_64, "pkg"),
+        )
+        is None
+    )
+
+
 @pytest.mark.parametrize(
     ("shards_base_url", "expected"),
     [
@@ -1650,6 +1703,58 @@ def test_repodata_shards_fallback_on_failed_package_shard(monkeypatch):
         PackageSubdir.LINUX_64,
         "pkg-a",
     ) not in repodata._package_shard_cache
+
+
+def test_repodata_shards_preserve_channel_order_with_fallback(monkeypatch):
+    channels = ["high-priority", "low-priority"]
+    subdir = PackageSubdir.LINUX_64
+    high_priority_repo = (channels[0], subdir)
+    low_priority_repo = (channels[1], subdir)
+    monkeypatch.setattr(utils.RepoData, "config", {"channels": channels})
+    repodata = utils.RepoData()
+    monkeypatch.setattr(repodata, "_package_shard_cache", {})
+
+    shard_idx = utils._CachedShardIndex(
+        shards={"pkg-a": "hash1"},
+        base_url="",
+        shards_base_url="",
+        fetched_at=datetime.datetime.now(datetime.UTC),
+    )
+    monkeypatch.setattr(
+        repodata,
+        "_get_shard_indexes",
+        lambda _repos: {low_priority_repo: shard_idx},
+    )
+
+    def record(channel):
+        return {
+            "name": "pkg-a",
+            "version": "1",
+            "build": "0",
+            "build_number": 0,
+            "depends": [],
+            "channel": channel,
+            "platform": subdir,
+            "subdir": subdir,
+        }
+
+    monkeypatch.setattr(
+        utils.AsyncRequests,
+        "fetch",
+        lambda *args, **kwargs: [[record(channels[1])]],
+    )
+    fallback_calls = []
+
+    def fallback(repositories):
+        fallback_calls.append(tuple(repositories))
+        return pd.DataFrame([record(channels[0])], columns=utils.RepoData.columns)
+
+    monkeypatch.setattr(repodata, "_get_repository_pairs_dataframe", fallback)
+
+    records = repodata._get_sharded_package_data(channels, [subdir], ["pkg-a"])
+
+    assert fallback_calls == [(high_priority_repo,)]
+    assert [item["channel"] for item in records] == channels
 
 
 def test_repodata_exact_repository_pair_fallback(monkeypatch):

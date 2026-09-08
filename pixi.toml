@@ -60,7 +60,6 @@ backoff = "2.2.*"  # retrying of failed API calls
 cachetools = "7.0.*"  # request caching (NEEDED?)
 
 # client API wrappers
-gitpython = "3.1.*"  # githandler
 gidgethub = "5.*"  # githubhandler
 
 # bioconductor-skeleton

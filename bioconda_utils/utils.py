@@ -1829,8 +1829,9 @@ class RepoData:
         shard_indexes = self._get_shard_indexes(repositories)
         now = datetime.datetime.now(datetime.UTC)
 
-        all_records: list[dict[str, Any]] = []
-        sharded_records: list[tuple[RepoDataKey, list[dict[str, Any]]]] = []
+        records_by_repo: dict[RepoDataKey, list[dict[str, Any]]] = {
+            repo: [] for repo in repositories
+        }
         to_fetch_urls: list[str] = []
         to_fetch_descs: list[str] = []
         to_fetch_metadata: list[tuple[str, Subdir, str]] = []
@@ -1856,7 +1857,7 @@ class RepoData:
                         and (now - cached.fetched_at).total_seconds()
                         <= self.cache_timeout
                     ):
-                        sharded_records.append((repo, cached.records))
+                        records_by_repo[repo].extend(cached.records)
                         continue
                     del self._package_shard_cache[cache_key]
 
@@ -1888,24 +1889,26 @@ class RepoData:
                             fetched_at=now,
                         )
                     )
-                    sharded_records.append((repo, recs))
+                    records_by_repo[repo].extend(recs)
             except (aiohttp.ClientError, OSError, TimeoutError, RuntimeError) as exc:
                 logger.debug("Error fetching package shards: %s", exc)
                 fallback_repos.update(
                     (channel, subdir) for channel, subdir, _ in to_fetch_metadata
                 )
 
-        for repo, records in sharded_records:
-            if repo not in fallback_repos:
-                all_records.extend(records)
-
         if fallback_repos:
-            df = self._get_repository_pairs_dataframe(fallback_repos)
+            ordered_fallback_repos = tuple(
+                repo for repo in repositories if repo in fallback_repos
+            )
+            df = self._get_repository_pairs_dataframe(ordered_fallback_repos)
             df_filtered = df[df["name"].isin(package_names)]
-            if not df_filtered.empty:
-                all_records.extend(df_filtered.to_dict("records"))
+            for channel, subdir in ordered_fallback_repos:
+                records_by_repo[(channel, subdir)] = df_filtered[
+                    (df_filtered["channel"] == channel)
+                    & (df_filtered["subdir"] == subdir)
+                ].to_dict("records")
 
-        return all_records
+        return list(chain.from_iterable(records_by_repo[repo] for repo in repositories))
 
     def _get_repository_dataframe(
         self, channels: Iterable[str], subdirs: Iterable[Subdir]

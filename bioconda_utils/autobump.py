@@ -159,7 +159,7 @@ class RecipeGraphSource(RecipeSource):
         exclude: list[str],
         shuffle: bool,
         config: dict[str, str],
-        cache_fn: str | None = None,
+        cache_fn: str | os.PathLike[str] | None = None,
     ) -> None:
         super().__init__(recipe_base, packages, exclude, shuffle)
         self.config = config
@@ -223,7 +223,7 @@ class Scanner(AsyncPipeline[Recipe]):
     def __init__(
         self,
         recipe_source: RecipeSource,
-        cache_fn: str | None = None,
+        cache_fn: str | os.PathLike[str] | None = None,
         status_fn: Path | None = None,
     ) -> None:
         super().__init__()
@@ -311,7 +311,9 @@ class ExcludeOtherChannel(Filter):
         template = "builds package found in other channel(s)"
         level = logging.DEBUG
 
-    def __init__(self, scanner: Scanner, channels: Sequence[str], cache: str) -> None:
+    def __init__(
+        self, scanner: Scanner, channels: Sequence[str], cache: Path | None
+    ) -> None:
         super().__init__(scanner)
         self.channels = channels
         logger.info("Loading package lists for %s", channels)

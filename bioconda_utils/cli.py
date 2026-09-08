@@ -550,7 +550,7 @@ def build(
     ] = None,
     threads: ThreadsOpt = 16,
     repodata_cache: Annotated[
-        str | None,
+        Path | None,
         typer.Option(
             "--repodata-cache",
             help="To speed up startup, use repodata cached locally in\n     the provided filename. If the file does not exist, it will be created the\n     first time. The cache is refreshed when it is older than 8 hours.",
@@ -572,7 +572,7 @@ def build(
     parsed_git_range = _parse_git_range_if_needed(git_range)
     cfg = utils.load_config(config)
     if repodata_cache is not None:
-        utils.RepoData().set_cache(repodata_cache)
+        utils.RepoData().set_cache(repodata_cache.expanduser())
     setup = cfg.get("setup", None)
     if setup:
         logger.debug("Running setup: %s", setup)
@@ -777,7 +777,7 @@ def lint(
     config: LintConfigArg = Path("config.yml"),
     packages: PackagesOpt = None,
     cache: Annotated[
-        str | None,
+        Path | None,
         typer.Option(
             "--cache",
             help="To speed up debugging, use repodata cached locally in\n     the provided filename. If the file does not exist, it will be created the\n     first time.",
@@ -821,7 +821,7 @@ def lint(
         _validate_path_exists(config)
         config_data = utils.load_config(config)
         if cache is not None:
-            utils.RepoData().set_cache(cache)
+            utils.RepoData().set_cache(cache.expanduser())
         recipes = get_recipes(
             config_data,
             recipe_folder,
@@ -986,7 +986,7 @@ def update_pinning(
         ),
     ] = False,
     cache: Annotated[
-        str | None,
+        Path | None,
         typer.Option(
             "--cache",
             help="To speed up debugging, use repodata cached locally in\n     the provided filename. If the file does not exist, it will be created the\n     first time.",
@@ -1009,7 +1009,7 @@ def update_pinning(
             config_data["channels"] += skip_additional_channels
         variant_keys = frozenset(skip_variants or ())
         if cache:
-            utils.RepoData().set_cache(cache)
+            utils.RepoData().set_cache(cache.expanduser())
         _ = utils.RepoData().df
         build_config = utils.load_conda_build_config()
         skiplist = Skiplist(config_data, recipe_folder)
@@ -1263,7 +1263,7 @@ def autobump(
         ),
     ] = None,
     cache: Annotated[
-        str | None,
+        Path | None,
         typer.Option(
             "--cache",
             help="To speed up debugging, use repodata cached locally in\n     the provided filename. If the file does not exist, it will be created\n     the first time. Caution: The cache will not be updated if\n     exclude-channels is changed",
@@ -1387,6 +1387,9 @@ def autobump(
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines, threads)
     package_patterns: PackagePatterns = packages or ["*"]
     excluded_channels = exclude_channels or ["conda-forge"]
+    if cache is not None:
+        # expand ~ before deriving the *_dag.pkl/_scan.pkl/_repodata.txt names
+        cache = cache.expanduser()
     use_default_signing_key = sign and sign_key is None
     try:
         # load and register config
@@ -1404,12 +1407,12 @@ def autobump(
                 exclude or [],
                 not no_shuffle,
                 config_dict,
-                cache_fn=cache and cache + "_dag.pkl",
+                cache_fn=cache and cache.with_name(cache.name + "_dag.pkl"),
             )
         # Setup scanning pipeline
         scanner = autobump.Scanner(
             recipe_source,
-            cache_fn=cache and cache + "_scan.pkl",
+            cache_fn=cache and cache.with_name(cache.name + "_scan.pkl"),
             status_fn=recipe_status,
         )
 
@@ -1467,7 +1470,7 @@ def autobump(
             scanner.add(
                 autobump.ExcludeOtherChannel,
                 excluded_channels,
-                cache and cache + "_repodata.txt",
+                cache and cache.with_name(cache.name + "_repodata.txt"),
             )
         # Test if due to pinnings, the package hash would change and a rebuild
         # has become necessary. If so, bump the buildnumber.

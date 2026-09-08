@@ -246,7 +246,7 @@ class AsyncRequests:
     #: Used as user agent in http requests and as requester in github API requests
     USER_AGENT = "bioconda/bioconda-utils"
 
-    def __init__(self, cache_fn: str | None = None) -> None:
+    def __init__(self, cache_fn: str | os.PathLike[str] | None = None) -> None:
         #: aiohttp session (only exists while running)
         self.session: aiohttp.ClientSession | None = None
         self.cache_fn = cache_fn

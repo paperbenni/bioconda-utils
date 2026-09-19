@@ -307,6 +307,54 @@ def test_recipe_selection_uses_range_base_and_ref(monkeypatch):
     assert calls == [("feature", "main")]
 
 
+def test_autobump_closes_git_handler_on_keyboard_interrupt(monkeypatch):
+    from bioconda_utils import autobump
+
+    closed = []
+
+    class RecipeSource:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+    class Scanner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def add(self, *_args, **_kwargs):
+            pass
+
+        def run(self):
+            raise KeyboardInterrupt
+
+    class Repo:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def checkout_master(self):
+            pass
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(cli, "_setup_runtime", lambda *_args: None)
+    monkeypatch.setattr(cli, "load_config", lambda *_args: {})
+    monkeypatch.setattr(cli, "BiocondaRepo", Repo)
+    monkeypatch.setattr(autobump, "RecipeSource", RecipeSource)
+    monkeypatch.setattr(autobump, "Scanner", Scanner)
+
+    with pytest.raises(KeyboardInterrupt):
+        cli.autobump(
+            no_follow_graph=True,
+            check_branch=True,
+            ignore_skiplists=True,
+            exclude_channels=["none"],
+            no_check_pinnings=True,
+            no_check_version_update=True,
+        )
+
+    assert closed == [True]
+
+
 def test_build_parses_typed_platform_option():
     command = cast(Any, get_command(cli.app)).commands["build"]
 

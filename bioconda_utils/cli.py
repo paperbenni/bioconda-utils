@@ -1413,6 +1413,7 @@ def autobump(
     package_patterns: PackagePatterns = packages or ["*"]
     excluded_channels = exclude_channels or ["conda-forge"]
     use_default_signing_key = sign and sign_key is None
+    git_handler = None
     try:
         # load and register config
         config_dict = load_config(config)
@@ -1458,7 +1459,6 @@ def autobump(
             scanner.add(autobump.ExcludeDependencyPending, recipe_source.dag)
 
         # Load recipe
-        git_handler = None
         if check_branch or create_branch or create_pr or only_active:
             # We need to take the recipe from the git repo. This
             # loads the bump/<recipe> branch if available
@@ -1534,13 +1534,16 @@ def autobump(
         # And go.
         scanner.run()
 
-        # Cleanup
-        if git_handler:
-            git_handler.close()
     except Exception:
         if _handle_pdb_exception("Autobump", pdb):
             return
         raise
+    finally:
+        # In addition to releasing GitPython's resources, BiocondaRepo.close()
+        # restores the branch that was active before autobump started.  This
+        # must also happen for BaseExceptions such as KeyboardInterrupt.
+        if git_handler is not None:
+            git_handler.close()
 
 
 @app.command("handle-merged-pr")

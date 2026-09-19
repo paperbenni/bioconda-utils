@@ -5,7 +5,7 @@ import os.path as op
 import pytest
 from ruamel.yaml import YAML
 
-from bioconda_utils.hosters import Hoster
+from bioconda_utils.hosters import Hoster, PyPi
 
 with open(op.join(op.dirname(__file__), "hoster_cases.yaml")) as data:
     TEST_CASES = YAML(typ="safe").load(data)
@@ -27,6 +27,36 @@ AVAIL_HOSTERS = {hoster.__name__: hoster for hoster in Hoster.hoster_types}
 @pytest.mark.parametrize("hoster", Hoster.hoster_types)
 def test_hoster_has_test_case(hoster):
     assert hoster.__name__ in TEST_CASES, f"Missing test cases for {hoster.__name__}"
+
+
+@pytest.mark.parametrize(
+    ("requires_python", "expected"),
+    [
+        ("<3.7", "3.6"),
+        ("~=3.6", "3.13"),
+        ("~=3.6.0", "3.6"),
+        (">=3.8", "3.13"),
+        ("==3.6.*", "3.6"),
+        (">=3.6,<4", "3.13"),
+    ],
+)
+def test_pypi_get_python_version_honors_pep440(requires_python, expected):
+    release = {"requires_python": requires_python, "info": {"classifiers": []}}
+
+    assert PyPi._get_python_version(release) == expected
+
+
+def test_pypi_get_python_version_rejects_unsupported_requirement():
+    release = {"requires_python": ">=4", "info": {"classifiers": []}}
+
+    with pytest.raises(ValueError, match="No supported Python version"):
+        PyPi._get_python_version(release)
+
+
+def test_pypi_get_python_version_defaults_to_current_supported_python():
+    release = {"requires_python": None, "info": {"classifiers": []}}
+
+    assert PyPi._get_python_version(release) == "3.13"
 
 
 @pytest.fixture(scope="class")

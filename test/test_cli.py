@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, cast
 
+import click
 import networkx as nx
 import pytest
 from typer.core import TyperArgument
@@ -183,7 +184,10 @@ def test_choices_are_enforced_before_command_execution():
     result = runner.invoke(cli.app, ["dag", "--output-format", "invalid"])
 
     assert result.exit_code == 2
-    assert "Invalid value for '--output-format'" in result.output
+    # Typer renders errors with rich and force-colors them when
+    # GITHUB_ACTIONS is set, which interleaves ANSI escapes into
+    # result.output (even splitting the option name into spans).
+    assert "Invalid value for '--output-format'" in click.unstyle(result.output)
 
 
 def test_dag_help_describes_dependency_edges():

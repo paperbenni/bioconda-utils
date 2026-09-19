@@ -10,15 +10,15 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-from collections.abc import Collection, Iterable, Iterator, Sized
+from collections.abc import Collection, Iterator
 from pathlib import Path
-from typing import Any
 
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import (
     BarColumn,
     DownloadColumn,
+    MofNCompleteColumn,
     Progress,
     SpinnerColumn,
     TaskProgressColumn,
@@ -33,7 +33,44 @@ console = Console()
 err_console = Console(stderr=True)
 
 
-def _make_progress() -> Progress:
+def count_progress() -> Progress:
+    """Progress display for counting items (recipes, files, ...) on stderr.
+
+    Use Rich's API directly, e.g.::
+
+        with count_progress() as progress:
+            for item in progress.track(items, description="Loading"):
+                ...
+
+    or for manual updates::
+
+        with count_progress() as progress:
+            task = progress.add_task("processing", total=n)
+            progress.update(task, advance=1)
+
+    Rich handles non-terminals itself (single final line, no animation),
+    so there is deliberately no disable logic here.
+    """
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=err_console,
+    )
+
+
+def download_progress() -> Progress:
+    """Progress display for byte downloads on stderr.
+
+    Use Rich's API directly, e.g.::
+
+        with download_progress() as progress:
+            task = progress.add_task(desc, total=size)
+            progress.update(task, advance=len(block))
+    """
     return Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -46,56 +83,9 @@ def _make_progress() -> Progress:
     )
 
 
-class _SilentProgress:
-    def update(self, _advance: float = 1) -> None:
-        return None
-
-
-@contextlib.contextmanager
-def progress_bar(total: int | None = None, description: str = "") -> Iterator[Any]:
-    """Rich download/item progress on stderr.
-
-    Yields an object with ``update(advance)``. Outside terminals this
-    yields a silent object so callers never branch.
-    """
-    if not err_console.is_terminal:
-        yield _SilentProgress()
-        return
-    progress = _make_progress()
-    with progress:
-        task = progress.add_task(description, total=total)
-        handle = progress
-
-        class _Handle:
-            def update(self, advance: float = 1) -> None:
-                handle.update(task, advance=advance)
-
-        yield _Handle()
-
-
-def track(
-    sequence: Iterable[Any], description: str = "", total: int | None = None
-) -> Iterator[Any]:
-    """Iterate with Rich progress on stderr, plain iteration when redirected."""
-    if total is None and isinstance(sequence, Sized):
-        total = len(sequence)
-    if not err_console.is_terminal:
-        yield from sequence
-        return
-    progress = _make_progress()
-    with progress:
-        task = progress.add_task(description, total=total)
-        for item in sequence:
-            yield item
-            progress.update(task, advance=1)
-
-
 @contextlib.contextmanager
 def status(message: str) -> Iterator[None]:
-    """Rich spinner status on stderr, no-op when redirected."""
-    if not err_console.is_terminal:
-        yield
-        return
+    """Rich spinner status on stderr."""
     with err_console.status(message):
         yield
 

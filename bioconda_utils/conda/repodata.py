@@ -36,7 +36,7 @@ from .._types import (
 )
 from ..support import http
 from ..support.caching import disk_cache
-from ..support.logsetup import track
+from ..support.logsetup import count_progress
 
 logger = logging.getLogger(__name__)
 
@@ -115,12 +115,15 @@ class AsyncRequests:
                 )
                 for url, desc, data, fd in zip_longest(urls, descs, datas, fds)
             ]
-            result = [
-                await coro
-                for coro in track(
-                    asyncio.as_completed(coros), description="Downloading"
-                )
-            ]
+            with count_progress() as progress:
+                result = [
+                    await coro
+                    for coro in progress.track(
+                        asyncio.as_completed(coros),
+                        total=len(coros),
+                        description="Downloading",
+                    )
+                ]
         return result
 
     @staticmethod

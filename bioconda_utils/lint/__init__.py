@@ -110,7 +110,7 @@ import networkx as nx
 from bioconda_utils.skiplist import Skiplist
 
 from .. import recipe as _recipe
-from ..support.logsetup import track
+from ..support.logsetup import count_progress
 from ..support.subproc import run
 
 logger = logging.getLogger(__name__)
@@ -587,17 +587,20 @@ class Linter:
           True if issues with errors were found
 
         """
-        for recipe_name in track(sorted(recipe_names), description="Linting"):
-            self.order_and_load_checks()
-            try:
-                msgs = self.lint_one(recipe_name, fix=fix)
-            except Exception:
-                if self.nocatch:
-                    raise
-                logger.exception("Unexpected exception in lint")
-                recipe = _recipe.Recipe(recipe_name, self.recipe_folder)
-                msgs = [linter_failure.make_message(recipe=recipe)]
-            self._messages.extend(msgs)
+        with count_progress() as progress:
+            for recipe_name in progress.track(
+                sorted(recipe_names), description="Linting"
+            ):
+                self.order_and_load_checks()
+                try:
+                    msgs = self.lint_one(recipe_name, fix=fix)
+                except Exception:
+                    if self.nocatch:
+                        raise
+                    logger.exception("Unexpected exception in lint")
+                    recipe = _recipe.Recipe(recipe_name, self.recipe_folder)
+                    msgs = [linter_failure.make_message(recipe=recipe)]
+                self._messages.extend(msgs)
 
         return any(message.severity >= ERROR for message in self._messages)
 

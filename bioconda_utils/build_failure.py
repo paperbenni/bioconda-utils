@@ -23,7 +23,7 @@ from bioconda_utils.conda.conda_build_bridge import load_meta_fast
 from bioconda_utils.conda.recipes import get_recipes
 from bioconda_utils.conda.repodata import RepoData, get_package_downloads
 from bioconda_utils.recipe import Recipe
-from bioconda_utils.support.logsetup import ellipsize_recipes, track
+from bioconda_utils.support.logsetup import count_progress, ellipsize_recipes
 from bioconda_utils.support.subproc import run
 
 from .githandler import BiocondaRepo, GitRange
@@ -319,59 +319,63 @@ def collect_build_failure_records(
     dag, _ = graph.build(recipes, config)
 
     def get_data() -> Iterator[dict[str, Any]]:
-        for recipe in track(recipes, description="Checking recipes"):
-            if not has_build_failure(recipe):
-                continue
+        with count_progress() as progress:
+            for recipe in progress.track(recipes, description="Checking recipes"):
+                if not has_build_failure(recipe):
+                    continue
 
-            rel_recipe = recipe.relative_to(recipe_folder)
-            components = rel_recipe.parts
-            is_version_subdir = len(components) == 2
+                rel_recipe = recipe.relative_to(recipe_folder)
+                components = rel_recipe.parts
+                is_version_subdir = len(components) == 2
 
-            if is_version_subdir and not has_build_failure(recipe.parent):
-                # Skip if the latest recipe does not have a build failure.
-                continue
+                if is_version_subdir and not has_build_failure(recipe.parent):
+                    # Skip if the latest recipe does not have a build failure.
+                    continue
 
-            package = components[0]
-            meta = load_meta_fast(str(recipe))[0]
-            package_name = meta["package"]["name"]
-            descendants = len(nx.descendants(dag, package_name))
+                package = components[0]
+                meta = load_meta_fast(str(recipe))[0]
+                package_name = meta["package"]["name"]
+                descendants = len(nx.descendants(dag, package_name))
 
-            downloads = get_package_downloads(channel, package_name)
-            recs = list(get_build_failure_records(recipe))
+                downloads = get_package_downloads(channel, package_name)
+                recs = list(get_build_failure_records(recipe))
 
-            limit = 80  # characters in last column to show before putting the rest in "<details>"
-            for rec in recs:
-                failures = format_link(
-                    str(rec.path), link_fmt, prefix=link_prefix, label=str(rec.platform)
-                )
-                categories = rec.category
-                reasons = rec.reason
-
-                if len(reasons) > limit:
-                    reasons = (
-                        reasons[:limit]
-                        + "..."
-                        + "<details>"
-                        + reasons[limit:]
-                        + "</details>"
+                limit = 80  # characters in last column to show before putting the rest in "<details>"
+                for rec in recs:
+                    failures = format_link(
+                        str(rec.path),
+                        link_fmt,
+                        prefix=link_prefix,
+                        label=str(rec.platform),
                     )
-                skiplisted = rec.skiplist
-                prs = format_link(
-                    f"https://github.com/bioconda/bioconda-recipes/pulls?q=is%3Apr+is%3Aopen+{package}",
-                    link_fmt,
-                    label="show",
-                )
+                    categories = rec.category
+                    reasons = rec.reason
 
-                yield {
-                    "recipe": str(rel_recipe),
-                    "downloads": downloads,
-                    "depending": descendants,
-                    "skiplisted": skiplisted,
-                    "category": categories,
-                    "build failures": failures,
-                    "pull requests": prs,
-                    "reason": reasons,
-                }
+                    if len(reasons) > limit:
+                        reasons = (
+                            reasons[:limit]
+                            + "..."
+                            + "<details>"
+                            + reasons[limit:]
+                            + "</details>"
+                        )
+                    skiplisted = rec.skiplist
+                    prs = format_link(
+                        f"https://github.com/bioconda/bioconda-recipes/pulls?q=is%3Apr+is%3Aopen+{package}",
+                        link_fmt,
+                        label="show",
+                    )
+
+                    yield {
+                        "recipe": str(rel_recipe),
+                        "downloads": downloads,
+                        "depending": descendants,
+                        "skiplisted": skiplisted,
+                        "category": categories,
+                        "build failures": failures,
+                        "pull requests": prs,
+                        "reason": reasons,
+                    }
 
     data = sorted(
         get_data(), key=lambda row: (row["depending"], row["downloads"]), reverse=True

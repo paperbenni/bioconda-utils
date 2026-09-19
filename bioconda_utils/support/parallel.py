@@ -8,7 +8,7 @@ import os
 from functools import partial
 from multiprocessing import Pool
 
-from .logsetup import track
+from .logsetup import count_progress
 
 _max_threads = 1
 
@@ -29,5 +29,9 @@ def threads_to_use():
 
 def parallel_iter(func, items, description, *args, **kwargs):
     pfunc = partial(func, *args, **kwargs)
-    with Pool(threads_to_use()) as pool:
-        yield from track(pool.imap_unordered(pfunc, items), description)
+    with Pool(threads_to_use()) as pool, count_progress() as progress:
+        yield from progress.track(
+            pool.imap_unordered(pfunc, items),
+            total=len(items),
+            description=description,
+        )

@@ -1504,7 +1504,7 @@ def test_load_conda_build_config_reads_pinnings_from_env_root(monkeypatch, tmp_p
     env_root = tmp_path / "env"
     env_root.mkdir()
     (env_root / "conda_build_config.yaml").write_text("{}\n")
-    monkeypatch.setattr(conda_build_bridge, "_env_root", lambda: env_root)
+    monkeypatch.setattr(conda_build_bridge, "env_root", lambda: env_root)
 
     config = conda_build_bridge.load_conda_build_config()
 

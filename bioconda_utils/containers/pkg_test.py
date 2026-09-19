@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .._types import MULLED_LOCAL_NAMESPACE, ContainerPlatform, PkgBuildRef
-from ..support.logsetup import status
+from ..support.logsetup import err_console
 from ..support.subproc import run
 
 logger = logging.getLogger(__name__)
@@ -280,7 +280,7 @@ fi
         cmd += ["/bin/bash", "/opt/test_script.bash"]
 
         logger.debug("Pre-solved mulled test command: %s", cmd)
-        with status("Running container test..."):
+        with err_console.status("Running container test..."):
             p = run(cmd, live=live_logs)
         return p
 
@@ -459,7 +459,10 @@ def build_and_test_mulled_image(
         raise ValueError("CONDA_IMAGE env var already exists!")
     else:
         env["CONDA_IMAGE"] = conda_image
-    with tempfile.TemporaryDirectory() as d, status("Building mulled image..."):
+    with (
+        tempfile.TemporaryDirectory() as d,
+        err_console.status("Building mulled image..."),
+    ):
         p = run(cmd, env=env, cwd=d, live=live_logs)
 
     return p

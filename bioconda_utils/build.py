@@ -50,7 +50,7 @@ from .conda.repodata import RepoData
 from .config import normalize_config
 from .containers import docker_utils, pkg_test, upload
 from .containers.container_manifests import write_image_record
-from .support.logsetup import status
+from .support.logsetup import err_console
 from .support.subproc import allowed_env_var, bin_for, run, sandboxed_env
 
 logger = logging.getLogger(__name__)
@@ -243,7 +243,7 @@ def build(
                 for config_file in get_conda_build_config_files():
                     cmd += [config_file.arg, config_file.path]
                 cmd += [os.path.join(recipe, "meta.yaml")]
-                with status("Building recipe..."):
+                with err_console.status("Building recipe..."):
                     run(cmd, live=live_logs)
 
         logger.info(

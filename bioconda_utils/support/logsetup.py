@@ -7,10 +7,9 @@ progress bars and spinners on stderr, and data tables on stdout.
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import os
-from collections.abc import Collection, Iterator
+from collections.abc import Collection
 from pathlib import Path
 
 from rich.console import Console
@@ -81,13 +80,6 @@ def download_progress() -> Progress:
         TimeRemainingColumn(),
         console=err_console,
     )
-
-
-@contextlib.contextmanager
-def status(message: str) -> Iterator[None]:
-    """Rich spinner status on stderr."""
-    with err_console.status(message):
-        yield
 
 
 class LogFuncFilter:

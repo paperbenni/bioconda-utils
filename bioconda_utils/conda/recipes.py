@@ -216,18 +216,19 @@ def check_recipe_skippable(recipe, check_channels, target_platform=None):
     rendered_subdirs = {_meta_subdir(meta) for meta in metas}
     queried_subdirs = sorted(rendered_subdirs | {"noarch"})
     r = RepoData()
-    num_existing_pkg_builds = Counter(
-        (name, version, build_number, subdir)
-        for name, version, build_number in packages
-        for subdir in r.get_package_data(
-            "subdir",
+    existing_channels = set()
+    num_existing_pkg_builds = Counter()
+    for name, version, build_number in packages:
+        for channel, subdir in r.get_package_data(
+            ["channel", "subdir"],
             name=name,
             version=version,
             build_number=build_number,
             channels=check_channels,
             platform=queried_subdirs,
-        )
-    )
+        ):
+            existing_channels.add(channel)
+            num_existing_pkg_builds[(name, version, build_number, subdir)] += 1
     if num_existing_pkg_builds == Counter():
         # No packages with same version + build num in channels: no need to skip
         return False
@@ -243,8 +244,9 @@ def check_recipe_skippable(recipe, check_channels, target_platform=None):
     if num_new_pkg_builds == num_existing_pkg_builds:
         logger.info(
             "FILTER: not building recipe %s because "
-            "the same number of builds are in channel(s) and it is not forced.",
+            "the same number of builds are in channel(s) [%s] and it is not forced.",
             recipe,
+            ", ".join(sorted(existing_channels)),
         )
         return True
     return False
@@ -254,6 +256,8 @@ def _filter_existing_packages(metas, check_channels):
     new_metas = []  # MetaData instances of packages not yet in channel
     existing_metas = []  # MetaData instances of packages already in channel
     divergent_builds = set()  # set of Dist (i.e., name-version-build) strings
+    # (subdir, build) -> channels containing that build
+    pkg_build_channels = defaultdict(set)
 
     key_build_meta = defaultdict(dict)
     for meta in metas:
@@ -265,9 +269,9 @@ def _filter_existing_packages(metas, check_channels):
     for pkg_key, build_meta in key_build_meta.items():
         target_subdirs = {pkg_build[0] for pkg_build in build_meta}
         queried_subdirs = sorted(target_subdirs | {"noarch"})
-        existing_pkg_builds = set(
+        existing_rows = list(
             r.get_package_data(
-                ["subdir", "build"],
+                ["channel", "subdir", "build"],
                 name=pkg_key[0],
                 version=pkg_key[1],
                 build_number=pkg_key[2],
@@ -275,6 +279,9 @@ def _filter_existing_packages(metas, check_channels):
                 platform=queried_subdirs,
             )
         )
+        existing_pkg_builds = {(row.subdir, row.build) for row in existing_rows}
+        for row in existing_rows:
+            pkg_build_channels[(row.subdir, row.build)].add(row.channel)
         for pkg_build, meta in build_meta.items():
             if pkg_build not in existing_pkg_builds:
                 new_metas.append(meta)
@@ -283,11 +290,13 @@ def _filter_existing_packages(metas, check_channels):
         # A build for one target must not be treated as divergent merely because
         # another target has a different build string.
         target_pkg_builds = {
-            x for x in existing_pkg_builds if x.subdir in target_subdirs | {"noarch"}
+            (x.subdir, x.build)
+            for x in existing_rows
+            if x.subdir in target_subdirs | {"noarch"}
         }
         for divergent_build in target_pkg_builds - set(build_meta.keys()):
             divergent_builds.add("-".join((pkg_key[0], pkg_key[1], divergent_build[1])))
-    return new_metas, existing_metas, divergent_builds
+    return new_metas, existing_metas, divergent_builds, pkg_build_channels
 
 
 def get_package_paths(
@@ -308,8 +317,8 @@ def get_package_paths(
     if not metas:
         return []
 
-    new_metas, existing_metas, divergent_builds = _filter_existing_packages(
-        metas, check_channels
+    new_metas, existing_metas, divergent_builds, pkg_build_channels = (
+        _filter_existing_packages(metas, check_channels)
     )
 
     if divergent_builds:
@@ -317,16 +326,25 @@ def get_package_paths(
 
     if force:
         for meta in existing_metas:
+            channels = sorted(
+                pkg_build_channels.get((_meta_subdir(meta), meta.build_id()), set())
+            )
             logger.info(
-                "FORCE: building %s although it is already in channel(s).",
+                "FORCE: building %s although it is already in channel(s) [%s].",
                 meta.pkg_fn(),
+                ", ".join(channels),
             )
         build_metas = new_metas + existing_metas
     else:
         for meta in existing_metas:
+            channels = sorted(
+                pkg_build_channels.get((_meta_subdir(meta), meta.build_id()), set())
+            )
             logger.info(
-                "FILTER: not building %s because it is in channel(s) and it is not forced.",
+                "FILTER: not building %s because it is in channel(s) [%s] "
+                "and it is not forced.",
                 meta.pkg_fn(),
+                ", ".join(channels),
             )
         # yield all pkgs that do not yet exist
         build_metas = new_metas

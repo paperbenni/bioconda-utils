@@ -1269,19 +1269,21 @@ def test_filter_existing_packages_queries_rendered_target_subdir(monkeypatch):
         queried_platforms.append(kwargs["platform"])
         return []
 
+    monkeypatch.setattr(RepoData, "config", {"channels": ["bioconda"]})
     monkeypatch.setattr(RepoData, "get_package_data", get_package_data)
 
     assert recipes._filter_existing_packages([meta], ["bioconda"]) == (
         [meta],
         [],
         set(),
+        {},
     )
     assert queried_platforms == [[PackageSubdir.LINUX_AARCH64, "noarch"]]
 
 
 def test_get_package_paths_force_builds_existing_and_logs_force(caplog, monkeypatch):
-    # get_package_data yields pandas itertuples rows for ["subdir", "build"]
-    ExistingBuild = namedtuple("ExistingBuild", ["subdir", "build"])
+    # get_package_data yields pandas itertuples rows for ["channel", "subdir", "build"]
+    ExistingBuild = namedtuple("ExistingBuild", ["channel", "subdir", "build"])
     meta = Mock()
     meta.name.return_value = "samtools"
     meta.version.return_value = "1.24"
@@ -1291,7 +1293,11 @@ def test_get_package_paths_force_builds_existing_and_logs_force(caplog, monkeypa
     meta.noarch = False
     meta.noarch_python = False
     meta.config.host_subdir = PackageSubdir.LINUX_64
-    existing_builds = [ExistingBuild(subdir=PackageSubdir.LINUX_64, build="h391949c_1")]
+    existing_builds = [
+        ExistingBuild(
+            channel="bioconda", subdir=PackageSubdir.LINUX_64, build="h391949c_1"
+        )
+    ]
 
     monkeypatch.setattr(RepoData, "config", {"channels": ["bioconda"]})
     monkeypatch.setattr(
@@ -1302,7 +1308,12 @@ def test_get_package_paths_force_builds_existing_and_logs_force(caplog, monkeypa
     monkeypatch.setattr(
         RepoData,
         "get_package_data",
-        lambda _self, _keys, **_k: existing_builds,
+        lambda _self, keys, **_k: (
+            []
+            if keys == ["channel", "subdir"]
+            # check_recipe_skippable: no matching version + build number yet
+            else existing_builds  # _filter_existing_packages
+        ),
     )
     monkeypatch.setattr(
         recipes.api, "get_output_file_paths", lambda m: [f"/tmp/{m.pkg_fn()}.tar.bz2"]
@@ -1312,11 +1323,13 @@ def test_get_package_paths_force_builds_existing_and_logs_force(caplog, monkeypa
     paths = recipes.get_package_paths("recipes/samtools", ["bioconda"], force=True)
     assert paths == ["/tmp/samtools-1.24-h391949c_1.tar.bz2"]
     assert "FORCE: building samtools-1.24-h391949c_1" in caplog.text
+    assert "channel(s) [bioconda]" in caplog.text
     assert "it is not forced" not in caplog.text
 
     caplog.clear()
     paths = recipes.get_package_paths("recipes/samtools", ["bioconda"], force=False)
     assert paths == []
+    assert "channel(s) [bioconda]" in caplog.text
     assert "it is not forced" in caplog.text
 
 
@@ -1348,6 +1361,37 @@ def test_check_recipe_skippable_queries_requested_target(monkeypatch):
     )
     assert loaded_targets == [(False, ContainerPlatform.LINUX_ARM64)]
     assert queried_platforms == [[PackageSubdir.LINUX_AARCH64, "noarch"]]
+
+
+def test_check_recipe_skippable_logs_channels_with_build(caplog, monkeypatch):
+    meta = Mock()
+    meta.name.return_value = "samtools"
+    meta.version.return_value = "1.24"
+    meta.build_number.return_value = 1
+    meta.get_value.return_value = None
+    meta.noarch = False
+    meta.noarch_python = False
+    meta.config.host_subdir = PackageSubdir.LINUX_64
+
+    monkeypatch.setattr(
+        recipes,
+        "_load_platform_metas",
+        lambda *_a, **_k: (PackageSubdir.LINUX_64, [meta]),
+    )
+    monkeypatch.setattr(RepoData, "config", {"channels": ["bioconda", "conda-forge"]})
+    # conda-forge already has samtools 1.24 build_number 1, bioconda does not
+    monkeypatch.setattr(
+        RepoData,
+        "get_package_data",
+        lambda _self, _keys, **_k: [("conda-forge", PackageSubdir.LINUX_64)],
+    )
+
+    caplog.set_level(logging.INFO, logger="bioconda_utils.conda.recipes")
+    assert recipes.check_recipe_skippable(
+        "samtools", ["bioconda", "conda-forge"], target_platform=None
+    )
+    assert "channel(s) [conda-forge]" in caplog.text
+    assert "[bioconda" not in caplog.text
 
 
 def test_native_platform_skipping(config_fixture):

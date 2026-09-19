@@ -4,8 +4,6 @@ from typing import cast
 
 import aiohttp
 
-from bioconda_utils.aiopipe import AsyncRequests as PipelineRequests
-from bioconda_utils.conda.repodata import AsyncRequests as RepodataRequests
 from bioconda_utils.support import http, logsetup
 
 
@@ -17,33 +15,12 @@ def test_make_session_uses_requested_user_agent():
     asyncio.run(check())
 
 
-def test_pipeline_requests_preserves_user_agent_override():
-    class CustomRequests(PipelineRequests):
-        USER_AGENT = "custom-pipeline-agent"
-
+def test_make_session_defaults_to_bioconda_user_agent():
     async def check():
-        async with CustomRequests() as requests:
-            assert requests.session is not None
-            assert requests.session.headers["User-Agent"] == CustomRequests.USER_AGENT
+        async with http.make_session() as session:
+            assert session.headers["User-Agent"] == http.USER_AGENT
 
     asyncio.run(check())
-
-
-def test_repodata_requests_preserves_user_agent_override(monkeypatch):
-    class CustomRequests(RepodataRequests):
-        USER_AGENT = "custom-repodata-agent"
-
-    original_make_session = http.make_session
-    observed_user_agents = []
-
-    def make_session(**kwargs):
-        observed_user_agents.append(kwargs["user_agent"])
-        return original_make_session(**kwargs)
-
-    monkeypatch.setattr(http, "make_session", make_session)
-    asyncio.run(CustomRequests.async_fetch([]))
-
-    assert observed_user_agents == [CustomRequests.USER_AGENT]
 
 
 def test_stream_download_yields_blocks_and_reports_progress(monkeypatch):

@@ -81,6 +81,7 @@ from .githubhandler import GitHubHandler
 from .hosters import Hoster
 from .recipe import Recipe
 from .recipe import load_parallel_iter as recipes_load_parallel_iter
+from .support import http
 
 #: Jinja environment used to render PR titles, descriptions and comments
 #: from the packaged templates.
@@ -1169,7 +1170,7 @@ class CreatePullRequest(GitFilter):
 
     async def async_init(self) -> None:
         """Create gidget GithubAPI object from session"""
-        await self.ghub.login(self.pipeline.req.session, self.pipeline.req.USER_AGENT)
+        await self.ghub.login(self.pipeline.req.session, http.USER_AGENT)
         await asyncio.sleep(1)  # let API settle
 
     @staticmethod

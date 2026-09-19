@@ -3,7 +3,7 @@ Access to the conda package directory (repodata) of anaconda.org channels.
 
 :class:`RepoData` is a singleton that loads channel/subdir repodata,
 caches it in memory and on disk, and answers package queries.
-:class:`AsyncRequests` is the parallel HTTP downloader it relies on.
+:func:`fetch` is the parallel HTTP downloader it relies on.
 """
 
 from __future__ import annotations
@@ -54,137 +54,124 @@ class _CachedRepoData:
     fetched_at: datetime.datetime
 
 
-class AsyncRequests:
-    """Download a bunch of files in parallel
+#: Max connections to each server
+CONNECTIONS_PER_HOST = 4
 
-    This is not really a class, more a name space encapsulating a bunch of calls.
+
+def fetch(
+    urls: Iterable[str],
+    descriptions: Iterable[str],
+    transform: Callable[[bytes, RepoDataKey], pd.DataFrame],
+    metadata: Iterable[RepoDataKey],
+) -> list[pd.DataFrame]:
+    """Fetch data from URLs.
+
+    This will use asyncio to manage a pool of connections at once, speeding
+    up download as compared to iterative use of ``requests`` significantly.
+    It will also retry on non-permanent HTTP error codes (i.e. 429, 502,
+    503 and 504).
+
+    Args:
+      urls: List of URLS
+      descriptions: Matching list of descriptions (for progress display)
+      transform: As each download completes, the raw bytes and the matching
+          entry from **metadata** are passed through this function, e.g. to
+          offload json parsing into the download loop.
+      metadata: Per-URL context handed to **transform** alongside the bytes.
     """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        logger.warning("Running fetch from within running loop")
+        # Workaround the fact that asyncio's loop is marked as not-reentrant
+        # (it is apparently easy to patch, but not desired by the devs,
+        with ThreadPool(1) as pool:
+            res = pool.apply(fetch, (urls, descriptions, transform, metadata))
+        return res
 
-    #: Identify ourselves
-    USER_AGENT = http.USER_AGENT
-    #: Max connections to each server
-    CONNECTIONS_PER_HOST = 4
+    # asyncio.run cancels the fetch on SIGINT before raising
+    # KeyboardInterrupt, so pending connections close cleanly
+    # transform is required here, so every item went through it --
+    # the cast spells out what the checker cannot infer.
+    return cast(
+        list[pd.DataFrame],
+        asyncio.run(async_fetch(urls, descriptions, transform, metadata)),
+    )
 
-    @classmethod
-    def fetch(
-        cls,
-        urls: Iterable[str],
-        descriptions: Iterable[str],
-        transform: Callable[[bytes, RepoDataKey], pd.DataFrame],
-        metadata: Iterable[RepoDataKey],
-    ) -> list[pd.DataFrame]:
-        """Fetch data from URLs.
 
-        This will use asyncio to manage a pool of connections at once, speeding
-        up download as compared to iterative use of ``requests`` significantly.
-        It will also retry on non-permanent HTTP error codes (i.e. 429, 502,
-        503 and 504).
-
-        Args:
-          urls: List of URLS
-          descriptions: Matching list of descriptions (for progress display)
-          transform: As each download completes, the raw bytes and the matching
-              entry from **metadata** are passed through this function, e.g. to
-              offload json parsing into the download loop.
-          metadata: Per-URL context handed to **transform** alongside the bytes.
-        """
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            pass
-        else:
-            logger.warning("Running AsyncRequests.fetch from within running loop")
-            # Workaround the fact that asyncio's loop is marked as not-reentrant
-            # (it is apparently easy to patch, but not desired by the devs,
-            with ThreadPool(1) as pool:
-                res = pool.apply(cls.fetch, (urls, descriptions, transform, metadata))
-            return res
-
-        # asyncio.run cancels the fetch on SIGINT before raising
-        # KeyboardInterrupt, so pending connections close cleanly
-        # transform is required here, so every item went through it --
-        # the cast spells out what the checker cannot infer.
-        return cast(
-            list[pd.DataFrame],
-            asyncio.run(cls.async_fetch(urls, descriptions, transform, metadata)),
-        )
-
-    @classmethod
-    async def async_fetch(
-        cls,
-        urls: Iterable[str] = (),
-        descriptions: Iterable[str] = (),
-        transform: Callable[[bytes, RepoDataKey], pd.DataFrame] | None = None,
-        metadata: Iterable[RepoDataKey] | None = None,
-    ) -> list[pd.DataFrame | bytes]:
-        if metadata is None:
-            metadata = []
-        conn = aiohttp.TCPConnector(limit_per_host=cls.CONNECTIONS_PER_HOST)
-        async with http.make_session(
-            user_agent=cls.USER_AGENT,
-            connector=conn,
-        ) as session:
-            coros = [
-                asyncio.create_task(
-                    cls._async_fetch_one(
-                        session,
-                        url,
-                        description,
-                        transform=transform,
-                        metadata=datum,
-                    )
-                )
-                for url, description, datum in zip_longest(urls, descriptions, metadata)
-            ]
-            with count_progress() as progress:
-                result = [
-                    await coro
-                    for coro in progress.track(
-                        asyncio.as_completed(coros),
-                        total=len(coros),
-                        description="Downloading",
-                    )
-                ]
-        return result
-
-    @staticmethod
-    @http.retry_on_transient
-    async def _async_fetch_one(
-        session: aiohttp.ClientSession,
-        url: str,
-        description: str,
-        transform: Callable[[bytes, RepoDataKey], pd.DataFrame] | None = None,
-        metadata: RepoDataKey | None = None,
-    ) -> pd.DataFrame | bytes:
-        chunks: list[bytes] = []
-        if url.startswith("file://"):
-            if os.path.exists(url[7:]):
-                async with aiofiles.open(url[7:], mode="rb") as f:
-                    chunks.append(await f.read())
-            else:
-                subdir = url.split("/")[-2]
-                d = {
-                    "info": {"subdir": subdir},
-                    "packages": {},
-                    "packages.conda": {},
-                    "removed": [],
-                    "repodata_version": 1,
-                }
-                chunks.append(json.dumps(d).encode("UTF-8"))
-        else:
-            async with session.get(url, timeout=None) as resp:
-                resp.raise_for_status()
-                async for block in http.stream_download(
-                    resp,
+async def async_fetch(
+    urls: Iterable[str] = (),
+    descriptions: Iterable[str] = (),
+    transform: Callable[[bytes, RepoDataKey], pd.DataFrame] | None = None,
+    metadata: Iterable[RepoDataKey] | None = None,
+) -> list[pd.DataFrame | bytes]:
+    if metadata is None:
+        metadata = []
+    conn = aiohttp.TCPConnector(limit_per_host=CONNECTIONS_PER_HOST)
+    async with http.make_session(connector=conn) as session:
+        coros = [
+            asyncio.create_task(
+                _async_fetch_one(
+                    session,
+                    url,
                     description,
-                    block_size=1024 * 16,
-                ):
-                    chunks.append(block)
-        raw = b"".join(chunks)
-        if transform is None:
-            return raw
-        assert metadata is not None
-        return transform(raw, metadata)
+                    transform=transform,
+                    metadata=datum,
+                )
+            )
+            for url, description, datum in zip_longest(urls, descriptions, metadata)
+        ]
+        with count_progress() as progress:
+            result = [
+                await coro
+                for coro in progress.track(
+                    asyncio.as_completed(coros),
+                    total=len(coros),
+                    description="Downloading",
+                )
+            ]
+    return result
+
+
+@http.retry_on_transient
+async def _async_fetch_one(
+    session: aiohttp.ClientSession,
+    url: str,
+    description: str,
+    transform: Callable[[bytes, RepoDataKey], pd.DataFrame] | None = None,
+    metadata: RepoDataKey | None = None,
+) -> pd.DataFrame | bytes:
+    chunks: list[bytes] = []
+    if url.startswith("file://"):
+        if os.path.exists(url[7:]):
+            async with aiofiles.open(url[7:], mode="rb") as f:
+                chunks.append(await f.read())
+        else:
+            subdir = url.split("/")[-2]
+            d = {
+                "info": {"subdir": subdir},
+                "packages": {},
+                "packages.conda": {},
+                "removed": [],
+                "repodata_version": 1,
+            }
+            chunks.append(json.dumps(d).encode("UTF-8"))
+    else:
+        async with session.get(url, timeout=None) as resp:
+            resp.raise_for_status()
+            async for block in http.stream_download(
+                resp,
+                description,
+                block_size=1024 * 16,
+            ):
+                chunks.append(block)
+    raw = b"".join(chunks)
+    if transform is None:
+        return raw
+    assert metadata is not None
+    return transform(raw, metadata)
 
 
 class RepoData:
@@ -378,7 +365,7 @@ class RepoData:
             return df
 
         if urls:
-            dfs = AsyncRequests.fetch(urls, descriptions, to_dataframe, repos)
+            dfs = fetch(urls, descriptions, to_dataframe, repos)
             res = pd.concat(dfs)
         else:
             res = pd.DataFrame(columns=self.columns)

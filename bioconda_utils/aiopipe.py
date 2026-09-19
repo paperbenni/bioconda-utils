@@ -258,9 +258,6 @@ class AsyncPipeline[ITEM]:
 class AsyncRequests:
     """Provides helpers for async access to URLs"""
 
-    #: Used as user agent in http requests and as requester in github API requests
-    USER_AGENT = http.USER_AGENT
-
     def __init__(self, cache_file: Path | None = None) -> None:
         #: aiohttp session (only exists while running)
         self.session: aiohttp.ClientSession | None = None
@@ -269,7 +266,7 @@ class AsyncRequests:
         self.cache: dict[str, dict[str, Any]] | None = None
 
     async def __aenter__(self) -> Self:
-        session = http.make_session(user_agent=self.USER_AGENT)
+        session = http.make_session()
         await session.__aenter__()
         self.session = session
         if self.cache_file is not None:
@@ -366,7 +363,7 @@ class AsyncRequests:
 
         parsed = urlparse(url)
         async with aioftp.Client.context(
-            parsed.netloc, password=self.USER_AGENT + "@", trust_env=True
+            parsed.netloc, password=http.USER_AGENT + "@", trust_env=True
         ) as client:
             res = [str(path) for path, _info in await client.list(parsed.path)]
         if self.cache:
@@ -383,7 +380,7 @@ class AsyncRequests:
         checksum = sha256()
         async with (
             aioftp.Client.context(
-                parsed.netloc, password=self.USER_AGENT + "@", trust_env=True
+                parsed.netloc, password=http.USER_AGENT + "@", trust_env=True
             ) as client,
             client.download_stream(parsed.path) as stream,
         ):

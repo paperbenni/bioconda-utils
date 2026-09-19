@@ -16,7 +16,7 @@ import os
 import platform
 import sys
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from itertools import product, zip_longest
 from multiprocessing.pool import ThreadPool
@@ -66,7 +66,13 @@ class AsyncRequests:
     CONNECTIONS_PER_HOST = 4
 
     @classmethod
-    def fetch(cls, urls, descs, cb, datas):
+    def fetch(
+        cls,
+        urls: Iterable[str],
+        descriptions: Iterable[str],
+        transform: Callable[[bytes, RepoDataKey], pd.DataFrame],
+        metadata: Iterable[RepoDataKey],
+    ) -> list[pd.DataFrame]:
         """Fetch data from URLs.
 
         This will use asyncio to manage a pool of connections at once, speeding
@@ -76,9 +82,11 @@ class AsyncRequests:
 
         Args:
           urls: List of URLS
-          descs: Matching list of descriptions (for progress display)
-          cb: As each download is completed, data is passed through this function.
-              Use to e.g. offload json parsing into download loop.
+          descriptions: Matching list of descriptions (for progress display)
+          transform: As each download completes, the raw bytes and the matching
+              entry from **metadata** are passed through this function, e.g. to
+              offload json parsing into the download loop.
+          metadata: Per-URL context handed to **transform** alongside the bytes.
         """
         try:
             asyncio.get_running_loop()
@@ -89,21 +97,28 @@ class AsyncRequests:
             # Workaround the fact that asyncio's loop is marked as not-reentrant
             # (it is apparently easy to patch, but not desired by the devs,
             with ThreadPool(1) as pool:
-                res = pool.apply(cls.fetch, (urls, descs, cb, datas))
+                res = pool.apply(cls.fetch, (urls, descriptions, transform, metadata))
             return res
 
         # asyncio.run cancels the fetch on SIGINT before raising
         # KeyboardInterrupt, so pending connections close cleanly
-        return asyncio.run(cls.async_fetch(urls, descs, cb, datas))
+        # transform is required here, so every item went through it --
+        # the cast spells out what the checker cannot infer.
+        return cast(
+            list[pd.DataFrame],
+            asyncio.run(cls.async_fetch(urls, descriptions, transform, metadata)),
+        )
 
     @classmethod
-    async def async_fetch(cls, urls, descs=None, cb=None, datas=None, fds=None):
-        if descs is None:
-            descs = []
-        if datas is None:
-            datas = []
-        if fds is None:
-            fds = []
+    async def async_fetch(
+        cls,
+        urls: Iterable[str] = (),
+        descriptions: Iterable[str] = (),
+        transform: Callable[[bytes, RepoDataKey], pd.DataFrame] | None = None,
+        metadata: Iterable[RepoDataKey] | None = None,
+    ) -> list[pd.DataFrame | bytes]:
+        if metadata is None:
+            metadata = []
         conn = aiohttp.TCPConnector(limit_per_host=cls.CONNECTIONS_PER_HOST)
         async with http.make_session(
             user_agent=cls.USER_AGENT,
@@ -111,9 +126,15 @@ class AsyncRequests:
         ) as session:
             coros = [
                 asyncio.create_task(
-                    cls._async_fetch_one(session, url, desc, cb, data, fd)
+                    cls._async_fetch_one(
+                        session,
+                        url,
+                        description,
+                        transform=transform,
+                        metadata=datum,
+                    )
                 )
-                for url, desc, data, fd in zip_longest(urls, descs, datas, fds)
+                for url, description, datum in zip_longest(urls, descriptions, metadata)
             ]
             with count_progress() as progress:
                 result = [
@@ -128,12 +149,18 @@ class AsyncRequests:
 
     @staticmethod
     @http.retry_on_transient
-    async def _async_fetch_one(session, url, desc, cb=None, data=None, fd=None):
-        result = []
+    async def _async_fetch_one(
+        session: aiohttp.ClientSession,
+        url: str,
+        description: str,
+        transform: Callable[[bytes, RepoDataKey], pd.DataFrame] | None = None,
+        metadata: RepoDataKey | None = None,
+    ) -> pd.DataFrame | bytes:
+        chunks: list[bytes] = []
         if url.startswith("file://"):
             if os.path.exists(url[7:]):
                 async with aiofiles.open(url[7:], mode="rb") as f:
-                    result.append(await f.read())
+                    chunks.append(await f.read())
             else:
                 subdir = url.split("/")[-2]
                 d = {
@@ -143,23 +170,21 @@ class AsyncRequests:
                     "removed": [],
                     "repodata_version": 1,
                 }
-                result.append(json.dumps(d).encode("UTF-8"))
+                chunks.append(json.dumps(d).encode("UTF-8"))
         else:
             async with session.get(url, timeout=None) as resp:
                 resp.raise_for_status()
                 async for block in http.stream_download(
                     resp,
-                    desc,
+                    description,
                     block_size=1024 * 16,
                 ):
-                    if fd:
-                        fd.write(block)
-                    else:
-                        result.append(block)
-        if cb:
-            return cb(b"".join(result), data)
-        else:
-            return b"".join(result)
+                    chunks.append(block)
+        raw = b"".join(chunks)
+        if transform is None:
+            return raw
+        assert metadata is not None
+        return transform(raw, metadata)
 
 
 class RepoData:
@@ -335,9 +360,9 @@ class RepoData:
             else repositories
         )
         urls = [self._make_repodata_url(c, p) for c, p in repos]
-        descs = [f"{c}/{p}" for c, p in repos]
+        descriptions = [f"{c}/{p}" for c, p in repos]
 
-        def to_dataframe(json_data, meta_data):
+        def to_dataframe(json_data: bytes, meta_data: RepoDataKey) -> pd.DataFrame:
             channel, platform = meta_data
             raw = json.loads(json_data)
             subdir = raw["info"]["subdir"]
@@ -353,7 +378,7 @@ class RepoData:
             return df
 
         if urls:
-            dfs = AsyncRequests.fetch(urls, descs, to_dataframe, repos)
+            dfs = AsyncRequests.fetch(urls, descriptions, to_dataframe, repos)
             res = pd.concat(dfs)
         else:
             res = pd.DataFrame(columns=self.columns)

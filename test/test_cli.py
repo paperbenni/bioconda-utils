@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 from bioconda_utils import cli
 from bioconda_utils.containers.artifacts import UploadResult
+from bioconda_utils.containers.pkg_test import CREATE_ENV_IMAGE
 from bioconda_utils.githandler import GitRange
 
 runner = CliRunner()
@@ -489,7 +490,7 @@ def test_build_uses_environment_aware_mulled_image_default():
     command = cast(Any, get_command(cli.app)).commands["build"]
     parameter = next(p for p in command.params if p.name == "mulled_conda_image")
 
-    assert parameter.default == cli.pkg_test.CREATE_ENV_IMAGE
+    assert parameter.default == CREATE_ENV_IMAGE
 
 
 def test_lint_list_checks_allows_missing_paths(monkeypatch):

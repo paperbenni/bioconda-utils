@@ -31,7 +31,7 @@ from ._types import (
     package_subdir_to_container_platform,
     parse_quay_upload_target,
 )
-from .containers import pkg_test
+from .containers.pkg_test import CREATE_ENV_IMAGE
 from .support.logsetup import console, ellipsize_recipes, err_console, setup_logger
 
 if TYPE_CHECKING:
@@ -506,7 +506,7 @@ def build(
             "--mulled-conda-image",
             help="Conda Docker image to install the package with during\n     the mulled based tests.",
         ),
-    ] = pkg_test.CREATE_ENV_IMAGE,
+    ] = CREATE_ENV_IMAGE,
     docker_base_image: Annotated[
         str | None,
         typer.Option(

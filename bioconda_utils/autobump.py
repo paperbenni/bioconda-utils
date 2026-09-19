@@ -255,17 +255,21 @@ class Scanner(AsyncPipeline[Recipe]):
         logger.info("Running pipeline with these steps:")
         for n, filt in enumerate(self.filters):
             logger.info(" %i. %s", n + 1, filt.get_info())
-        super().run()
-        logger.info("")
-        logger.info("Recipe status statistics:")
-        for key, value in self.stats.most_common():
-            logger.info("%s: %s", key, value)
-        logger.info("SUM: %i", sum(self.stats.values()))
-        if self.status_fn:
-            with open(self.status_fn, "w") as out:
-                out.writelines(
-                    f"{rname}\t{result.name}\n" for rname, result in self.status
-                )
+        try:
+            super().run()
+        finally:
+            # write stats even when the run was aborted (Ctrl-C or error),
+            # so partial results are not lost
+            logger.info("")
+            logger.info("Recipe status statistics:")
+            for key, value in self.stats.most_common():
+                logger.info("%s: %s", key, value)
+            logger.info("SUM: %i", sum(self.stats.values()))
+            if self.status_fn:
+                with open(self.status_fn, "w") as out:
+                    out.writelines(
+                        f"{rname}\t{result.name}\n" for rname, result in self.status
+                    )
 
     async def queue_items(
         self, send_q: asyncio.Queue[Recipe], return_q: asyncio.Queue[Recipe]
@@ -281,19 +285,17 @@ class Scanner(AsyncPipeline[Recipe]):
             await super()._async_run()
 
     async def process(self, item: Recipe) -> bool:
-        """Applies the filters to a recipe"""
+        """Applies the filters to a recipe, recording the outcome"""
         recipe = item
         try:
-            res = False
-            if await super().process(recipe):
-                self.stats["Updated"] += 1
-                res = True
-            return False
+            updated = await super().process(recipe)
         except EndProcessingItem as recipe_error:
             self.stats[recipe_error.name] += 1
             self.status.append((recipe.reldir, recipe_error))
-            res = True
-        return res
+            return False
+        if updated:
+            self.stats["Updated"] += 1
+        return updated
 
 
 class Filter(AsyncFilter[Recipe]):

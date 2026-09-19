@@ -110,7 +110,7 @@ class AsyncRequests:
             connector=conn,
         ) as session:
             coros = [
-                asyncio.ensure_future(
+                asyncio.create_task(
                     cls._async_fetch_one(session, url, desc, cb, data, fd)
                 )
                 for url, desc, data, fd in zip_longest(urls, descs, datas, fds)

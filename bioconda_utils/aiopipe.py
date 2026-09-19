@@ -29,7 +29,15 @@ class EndProcessing(BaseException):
 
 
 class EndProcessingItem(Exception):
-    """Raised to indicate that an item should not be processed further"""
+    """Raised to indicate that an item should not be processed further
+
+    This is the carrier of the per-item skip reason (e.g. the subclasses
+    in :mod:`bioconda_utils.autobump` recording why a recipe was not
+    updated). ``AsyncPipeline.process`` logs and re-raises it; a subclass
+    that wants to record the reason must catch it in its ``process``
+    override (see ``autobump.Scanner.process``). Letting it escape
+    uncaught aborts the whole run.
+    """
 
     __slots__ = ["args", "item"]
     template = "broken: %s"
@@ -63,7 +71,11 @@ class AsyncFilter[ITEM](abc.ABC):
 
     @abc.abstractmethod
     async def apply(self, recipe: ITEM):
-        """Process a recipe. Returns False if processing should stop"""
+        """Process a recipe
+
+        Raise ``EndProcessingItem`` to skip this item (with a reason),
+        or ``EndProcessing`` to terminate the whole run.
+        """
 
     def get_info(self) -> str:
         """Return description of filter for logging"""
@@ -101,21 +113,32 @@ class AsyncPipeline[ITEM]:
         self.filters.append(filt(self, *args, **kwargs))
 
     def run(self) -> None:
-        """Enters the asyncio loop and manages shutdown."""
+        """Enters the asyncio loop and manages shutdown.
+
+        KeyboardInterrupt (Ctrl-C) and fatal worker errors propagate to
+        the caller, so the process exits with a non-zero status. Only
+        ``EndProcessing`` -- the filters' deliberate "stop here" signal
+        -- terminates the run with a success status.
+        """
         try:
             asyncio.run(self._async_run())
             logger.warning("Finished update")
-        except* KeyboardInterrupt:
+        except* KeyboardInterrupt as eg:
             # asyncio.Runner (used by asyncio.run) turns SIGINT into
             # cancellation of the pipeline, then raises KeyboardInterrupt
-            # once everything has unwound
+            # once everything has unwound. Re-raise the naked exception
+            # (bare raise inside except* would wrap it in a group) so
+            # plain KeyboardInterrupt handlers keep working and the
+            # interpreter exits non-zero instead of reporting success.
             self._shutting_down = True
             logger.error("Ctrl-C pressed - aborting...")
+            (interrupt,) = eg.exceptions
+            raise interrupt
         except* EndProcessing:
             self._shutting_down = True
             logger.error("Terminating...")
         finally:
-            self.proc_pool_executor.shutdown()
+            self.proc_pool_executor.shutdown(cancel_futures=True)
             for filt in self.filters:
                 filt.finalize()
 
@@ -176,21 +199,36 @@ class AsyncPipeline[ITEM]:
     async def worker(
         self, in_q: asyncio.Queue[ITEM], out_q: asyncio.Queue[ITEM]
     ) -> None:
-        while True:
-            try:
-                item = await in_q.get()
-            except asyncio.QueueShutDown:
-                return
-            await self.process(item)
-            await out_q.put(item)
-            in_q.task_done()
+        try:
+            while True:
+                try:
+                    item = await in_q.get()
+                except asyncio.QueueShutDown:
+                    return
+                await self.process(item)
+                await out_q.put(item)
+                in_q.task_done()
+        except asyncio.CancelledError:
+            # flag before the unwind continues, so concurrent workers
+            # suppress their error logging during the abort (see process)
+            self._shutting_down = True
+            raise
 
     async def process(self, item: ITEM) -> bool:
-        """Applies the filters to an item"""
+        """Applies the filters to an item
+
+        Returns True if the item passed all filters, False if it failed
+        one (logged) or was skipped via EndProcessingItem. Exceptions are
+        propagated -- EndProcessingItem (skip reason, handled by process
+        overrides), EndProcessing / BrokenExecutor (abort the run).
+        """
         try:
             for filt in self.filters:
                 await filt.apply(item)
         except asyncio.CancelledError:
+            raise
+        except EndProcessing:
+            self._shutting_down = True
             raise
         except EndProcessingItem as item_error:
             item_error.log(logger)

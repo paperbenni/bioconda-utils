@@ -132,6 +132,86 @@ def test_end_processing_terminates_pipeline() -> None:
     assert len(seen) < total, "EndProcessing did not stop item processing"
 
 
+def test_keyboard_interrupt_exits_nonzero(tmp_path) -> None:
+    """Ctrl-C must escape run() so the process exits non-zero.
+
+    Regression test: run() used to swallow KeyboardInterrupt, making
+    interrupted runs report success (exit code 0) to the shell. Runs a
+    real pipeline in a subprocess and SIGINTs it mid-flight, because
+    signals cannot be tested safely inside the pytest process itself.
+    """
+    import subprocess
+    import sys
+
+    script = tmp_path / "sigint_pipeline.py"
+    script.write_text(
+        """
+import asyncio, os, signal, sys, threading, time
+from bioconda_utils.aiopipe import AsyncFilter, AsyncPipeline
+
+seen = []
+first_item = threading.Event()
+sigint_sent = threading.Event()
+
+class Collect(AsyncFilter):
+    async def apply(self, recipe):
+        seen.append(recipe)
+        first_item.set()
+        if len(seen) == 1:
+            # hold the pipeline open until the SIGINT was sent, so the
+            # interrupt lands inside the running event loop
+            while not sigint_sent.is_set():
+                await asyncio.sleep(0.05)
+
+class Pipeline(AsyncPipeline):
+    def __init__(self):
+        super().__init__(threads=2)
+        self.items = list(range(100))
+
+    async def queue_items(self, send_q, return_q):
+        for i in self.items:
+            await send_q.put(i)
+        for _ in self.items:
+            await return_q.get()
+            return_q.task_done()
+
+    def get_item_count(self):
+        return len(self.items)
+
+def send_sigint():
+    if not first_item.wait(30):
+        raise RuntimeError("pipeline never processed an item")
+    os.kill(os.getpid(), signal.SIGINT)
+    sigint_sent.set()
+
+pipeline = Pipeline()
+pipeline.add(Collect, seen)
+threading.Thread(target=send_sigint, daemon=True).start()
+try:
+    pipeline.run()
+except KeyboardInterrupt:
+    print(f"KI-RAISED processed={len(seen)}")
+    raise
+"""
+    )
+    proc = subprocess.run(
+        [sys.executable, str(script)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode != 0, (
+        f"interrupted pipeline exited successfully; stderr:\n{proc.stderr}"
+    )
+    # the child must have been interrupted *by our signal*, not crashed
+    assert "KI-RAISED" in proc.stdout, (
+        f"pipeline did not handle SIGINT; stdout:\n{proc.stdout}\n"
+        f"stderr:\n{proc.stderr}"
+    )
+    assert "KI-RAISED processed=0" not in proc.stdout
+
+
 def test_end_processing_item_skips_single_item() -> None:
     class SkipOdd(AsyncFilter[int]):
         async def apply(self, recipe: int) -> None:

@@ -94,7 +94,7 @@ def get_recipes(
             meta_yaml_found_or_excluded = False
             for dir_path, _, file_names in os.walk(new_dir):
                 if any(
-                    fnmatch.fnmatch(dir_path[len(recipe_folder_text) :], pat)
+                    fnmatch.fnmatch(dir_path.removeprefix(recipe_folder_text), pat)
                     for pat in exclude_patterns
                 ):
                     meta_yaml_found_or_excluded = True

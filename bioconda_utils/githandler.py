@@ -292,7 +292,7 @@ class GitHandlerBase:
         abs_repo_root = os.path.abspath(self.repo.working_dir)
         if not abs_file_name.startswith(abs_repo_root):
             raise RuntimeError(f"File {abs_file_name} not inside {abs_repo_root}")
-        rel_file_name = abs_file_name[len(abs_repo_root) :].lstrip("/")
+        rel_file_name = abs_file_name.removeprefix(abs_repo_root).lstrip("/")
         commit = getattr(branch, "commit", branch)
         blob = commit.tree / rel_file_name
         if blob:

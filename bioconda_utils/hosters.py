@@ -654,11 +654,11 @@ class PyPi(JSONHoster):
                     ("<=", lambda x, y: x <= y),
                     (">=", lambda x, y: x >= y),
                     (">", lambda x, y: x > y),
-                    ("<", lambda x, y: x > y),
+                    ("<", lambda x, y: x < y),
                     ("~=", lambda x, y: x == y),
                 ):
                     if check.startswith(key):
-                        checks.append((func, check[len(key) :]))
+                        checks.append((func, check.removeprefix(key)))
                         break
                 else:
                     checks.append((lambda x, y: x == y, check))

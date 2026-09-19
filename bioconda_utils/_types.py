@@ -49,6 +49,9 @@ DEFAULT_PRIMARY_PLATFORMS: tuple[PackageSubdir, ...] = (
     PackageSubdir.LINUX_64,
     PackageSubdir.OSX_64,
 )
+#: Application hosting the CI build artifacts a merged pull request produced.
+ArtifactSource = Literal["azure", "circleci", "github-actions"]
+
 #: Conda repodata subdir notation, including ``noarch``.
 type Subdir = PackageSubdir | Literal["noarch"]
 #: A two-part OS label -- the form conda-build's ``config.platform`` and its

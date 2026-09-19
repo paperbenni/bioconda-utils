@@ -1,5 +1,7 @@
 """Bioconda Utils command-line interface built with Typer."""
 
+from __future__ import annotations
+
 # Workaround for spurious numpy warning message
 # ".../importlib/_bootstrap.py:219: RuntimeWarning: numpy.dtype size \
 # changed, may indicate binary incompatibility. Expected 96, got 88"
@@ -13,59 +15,55 @@ import warnings
 from collections import Counter, defaultdict
 from functools import partial
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-import networkx as nx
-import requests
 import typer
-from networkx.drawing.nx_pydot import write_dot
-from rich.markdown import Markdown
 from rich.table import Table
 
-from bioconda_utils import bulk
-from bioconda_utils.build_failure import (
-    BUILD_FAILURE_COLUMNS,
-    BuildFailureRecord,
-    collect_build_failure_records,
-)
-from bioconda_utils.containers.artifacts import (
-    ArtifactSource,
-    UploadResult,
-    upload_pr_artifacts,
-)
-from bioconda_utils.skiplist import Skiplist
-
 from . import __version__ as VERSION
-from . import bioconductor_skeleton as _bioconductor_skeleton
-from . import cran_skeleton, graph, update_pinnings
-from . import lint as _lint
 from ._types import (
     ALL_CONTAINER_PLATFORMS,
     ALL_PACKAGE_SUBDIRS,
+    ArtifactSource,
     ContainerPlatform,
     PackageSubdir,
     QuayUploadTarget,
     package_subdir_to_container_platform,
     parse_quay_upload_target,
 )
-from .build import build_recipes
-from .conda.conda_build_bridge import load_conda_build_config
-from .conda.recipes import get_recipes as find_recipes
-from .conda.repodata import RepoData
-from .config import load_config
-from .containers import docker_utils, pkg_test
-from .containers.container_manifests import (
-    DEFAULT_MULLED_RECORDS_DIR,
-    load_image_records,
-    reconcile_manifests,
-    resolve_registry_creds,
-)
-from .githandler import BiocondaRepo, GitRange, install_gpg_key
+from .containers import pkg_test
 from .support.logsetup import console, ellipsize_recipes, err_console, setup_logger
-from .support.parallel import parallel_iter, set_max_threads
-from .support.subproc import bin_for, run
+
+if TYPE_CHECKING:
+    # Annotation-only: imported lazily inside the functions that need it.
+    from .githandler import GitRange
 
 warnings.filterwarnings("ignore", message="numpy.dtype size changed")
+
+# Everything else a command needs -- pandas, networkx, conda-build, GitPython,
+# PyGithub, aiohttp, the repo/graph/config helpers -- is imported inside the
+# command bodies below. Rendering ``--help`` only requires the command
+# callables and the parameter types above, so importing the rest eagerly made
+# every invocation pay about a second for modules it never used.
+
+#: Modules that are imported on demand but kept reachable as attributes of this
+#: module for callers that introspect or monkeypatch them.
+_LAZY_MODULE_ATTRIBUTES: dict[str, tuple[str, str | None]] = {
+    "graph": ("bioconda_utils.graph", None),
+    "_lint": ("bioconda_utils.lint", None),
+    "GitRange": ("bioconda_utils.githandler", "GitRange"),
+    "UploadResult": ("bioconda_utils.containers.artifacts", "UploadResult"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve lazily-imported submodules and classes (PEP 562)."""
+    try:
+        module_name, attribute = _LAZY_MODULE_ATTRIBUTES[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    module = importlib.import_module(module_name)
+    return module if attribute is None else getattr(module, attribute)
 
 
 def is_stable_version(version: str) -> bool:
@@ -117,6 +115,8 @@ def _resolve_image_records_dir(
     if records:
         return records
     if upload_target:
+        from .containers.container_manifests import DEFAULT_MULLED_RECORDS_DIR
+
         return DEFAULT_MULLED_RECORDS_DIR
     return None
 
@@ -128,6 +128,8 @@ def _validate_positive_int(value: int) -> int:
 
 
 def _parse_git_range(value: str) -> GitRange:
+    from .githandler import GitRange
+
     try:
         return GitRange.parse(value)
     except ValueError as exc:
@@ -268,6 +270,8 @@ def get_recipes_to_build(git_range: GitRange, recipe_folder: Path) -> list[Path]
       List of recipes for which meta.yaml or build.sh was modified or
       which were unblacklisted.
     """
+    from .githandler import BiocondaRepo
+
     repo = BiocondaRepo(recipe_folder)
     return [
         Path(recipe)
@@ -289,6 +293,8 @@ def get_recipes(
     removes blacklisted recipes (unless include_blacklisted=True).
 
     """
+    from .conda.recipes import get_recipes as find_recipes
+
     recipes = list(find_recipes(recipe_folder, packages))
     logger.info(
         "Considering total of %s recipes%s.",
@@ -310,6 +316,8 @@ def get_recipes(
                 ellipsize_recipes(recipes, recipe_folder),
             )
     if not include_blacklisted:
+        from .skiplist import Skiplist
+
         skiplist = Skiplist(config, recipe_folder)
         all_len = len(recipes)
         recipes = [recipe for recipe in recipes if not skiplist.is_skiplisted(recipe)]
@@ -334,6 +342,8 @@ def _setup_runtime(
         "bioconda_utils", loglevel, logfile, logfile_level, log_command_max_lines
     )
     if threads is not None:
+        from .support.parallel import set_max_threads
+
         set_max_threads(threads)
 
 
@@ -361,6 +371,8 @@ def root(
 @app.command("diagnostics")
 def diagnostics() -> None:
     """Print details about the active Bioconda build environment."""
+    from .conda.conda_build_bridge import load_conda_build_config
+
     config = load_conda_build_config()
 
     console.print(f"bioconda-utils version: {VERSION}", markup=False)
@@ -601,6 +613,12 @@ def build(
     )
     package_patterns: PackagePatterns = packages or ["*"]
     parsed_git_range = _parse_git_range_if_needed(git_range)
+    from .build import build_recipes
+    from .conda.repodata import RepoData
+    from .config import load_config
+    from .containers import docker_utils
+    from .support.subproc import run
+
     cfg = load_config(config)
     if repodata_cache is not None:
         RepoData().set_cache(repodata_cache)
@@ -712,6 +730,12 @@ def dag(
     """
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
     package_patterns: PackagePatterns = packages or ["*"]
+    import networkx as nx
+
+    from . import graph
+    from .conda.recipes import get_recipes as find_recipes
+    from .config import load_config
+
     config_data = load_config(config)
     dag, name2recipes = graph.build(
         find_recipes(recipe_folder, package_patterns), config_data
@@ -721,6 +745,8 @@ def dag(
     if output_format == "gml":
         nx.write_gml(dag, sys.stdout.buffer)
     elif output_format == "dot":
+        from networkx.drawing.nx_pydot import write_dot
+
         write_dot(dag, sys.stdout)
     elif output_format == "txt":
         subdags: list[list[str]] = sorted(
@@ -798,6 +824,12 @@ def dependent(
         raise typer.BadParameter(
             "One of `--dependencies` or `--reverse-dependencies` is required."
         )
+    import networkx as nx
+
+    from . import graph
+    from .conda.recipes import get_recipes as find_recipes
+    from .config import load_config
+
     config_data = load_config(config)
     d, _ = graph.build(find_recipes(recipe_folder), config_data, restrict=restrict)
     if reverse_dependencies is not None:
@@ -853,6 +885,10 @@ def lint(
     Reports linting results to stdout."""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
     package_patterns: PackagePatterns = packages or ["*"]
+    from . import lint as _lint
+    from .conda.repodata import RepoData
+    from .config import load_config
+
     try:
         parsed_git_range = _parse_git_range_if_needed(git_range)
         if list_checks:
@@ -942,6 +978,9 @@ def duplicates(
         raise ValueError(
             "Removing packages is only supported in case of --strict-build."
         )
+    from .conda.repodata import RepoData
+    from .config import load_config
+
     config_data = load_config(Path(config))
     if channel not in config_data["channels"]:
         raise ValueError("Channel given with --channel must be in config channels")
@@ -957,6 +996,8 @@ def duplicates(
         check_fields += ["build"]
 
     def remove_package(spec):
+        from .support.subproc import bin_for, run
+
         for ext in (".tar.bz2", ".conda"):
             name, version = spec[:2]
             dist = "{}-{}-{}".format(*spec)
@@ -1065,6 +1106,15 @@ def update_pinning(
     to a change in pinnings"""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines, threads)
     package_patterns: PackagePatterns = packages or ["*"]
+    import networkx as nx
+
+    from . import graph, update_pinnings
+    from .conda.conda_build_bridge import load_conda_build_config
+    from .conda.repodata import RepoData
+    from .config import load_config
+    from .skiplist import Skiplist
+    from .support.parallel import parallel_iter
+
     try:
         config_data = load_config(config)
         if skip_additional_channels:
@@ -1230,6 +1280,11 @@ def bioconductor_skeleton(
         bioconda-utils bioconductor-skeleton --packages DESeq2 --packages edgeR --recursive
         bioconda-utils bioconductor-skeleton --update-all"""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
+    import requests
+
+    from . import bioconductor_skeleton as _bioconductor_skeleton
+    from .config import load_config
+
     config_data = load_config(config)
     skip_if_in_channels = (
         skip_if_in_channels
@@ -1316,6 +1371,8 @@ def clean_cran_skeleton(
 
     Use --no-windows for a Bioconda submission."""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
+    from . import cran_skeleton
+
     cran_skeleton.clean_skeleton_files(recipe, no_windows=no_windows)
 
 
@@ -1458,6 +1515,9 @@ def autobump(
     excluded_channels = exclude_channels or ["conda-forge"]
     use_default_signing_key = sign and sign_key is None
     git_handler = None
+    from .config import load_config
+    from .githandler import BiocondaRepo, install_gpg_key
+
     try:
         # load and register config
         config_dict = load_config(config)
@@ -1657,6 +1717,9 @@ def handle_merged_pr(
     image_records_dir = _resolve_image_records_dir(
         image_records_dir, parsed_upload_target
     )
+    from .conda.repodata import RepoData
+    from .containers.artifacts import UploadResult, upload_pr_artifacts
+
     res = upload_pr_artifacts(
         repo,
         parsed_git_range.ref,
@@ -1733,6 +1796,13 @@ def create_mulled_manifests(
         )
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--platform") from exc
+    from .containers.container_manifests import (
+        DEFAULT_MULLED_RECORDS_DIR,
+        load_image_records,
+        reconcile_manifests,
+        resolve_registry_creds,
+    )
+
     paths = record_paths or []
     if not paths:
         if not DEFAULT_MULLED_RECORDS_DIR.exists():
@@ -1799,6 +1869,8 @@ def annotate_build_failures(
     ] = False,
 ) -> None:
     """Create or update recipe build-failure records."""
+    from .build_failure import BuildFailureRecord
+
     target_platforms = platform if platform is not None else list(ALL_PACKAGE_SUBDIRS)
     for recipe in recipes:
         if existing_only:
@@ -1846,6 +1918,11 @@ def list_build_failures(
     git_range: GitRangeOpt = None,
 ) -> None:
     """List recipes with build failure records"""
+    from rich.markdown import Markdown
+
+    from .build_failure import BUILD_FAILURE_COLUMNS, collect_build_failure_records
+    from .config import load_config
+
     config_data = load_config(config)
     parsed_git_range = _parse_git_range_if_needed(git_range)
     records = collect_build_failure_records(
@@ -1879,6 +1956,8 @@ def list_build_failures(
 def bulk_trigger_ci() -> None:
     """Create an empty commit with the string "[ci run]" and push, which
     triggers a bulk CI run. Must be on the `bulk` branch."""
+    from . import bulk
+
     bulk.trigger_ci()
 
 

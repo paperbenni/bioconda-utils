@@ -61,7 +61,10 @@ def test_diagnostics(monkeypatch, tmp_path):
             "exclusive_config_files": [first, second],
         },
     )()
-    monkeypatch.setattr(cli, "load_conda_build_config", lambda: config)
+    monkeypatch.setattr(
+        "bioconda_utils.conda.conda_build_bridge.load_conda_build_config",
+        lambda: config,
+    )
 
     result = runner.invoke(cli.app, ["diagnostics"])
 
@@ -196,7 +199,7 @@ def test_dag_hides_singletons(monkeypatch, tmp_path):
     package_dag = nx.DiGraph([("dependency", "package")])
     package_dag.add_node("singleton")
     name2recipes = {name: {Path("recipes") / name} for name in package_dag.nodes}
-    monkeypatch.setattr(cli, "load_config", lambda _: {})
+    monkeypatch.setattr("bioconda_utils.config.load_config", lambda _: {})
     monkeypatch.setattr(cli, "get_recipes", lambda *_: [])
     monkeypatch.setattr(cli.graph, "build", lambda *_: (package_dag, name2recipes))
 
@@ -297,7 +300,7 @@ def test_recipe_selection_uses_range_base_and_ref(monkeypatch):
             calls.append((ref, base))
             return ["recipes/example"]
 
-    monkeypatch.setattr(cli, "BiocondaRepo", Repo)
+    monkeypatch.setattr("bioconda_utils.githandler.BiocondaRepo", Repo)
 
     result = cli.get_recipes_to_build(
         cli.GitRange.parse("main...feature"), Path("recipes")
@@ -337,8 +340,8 @@ def test_autobump_closes_git_handler_on_keyboard_interrupt(monkeypatch):
             closed.append(True)
 
     monkeypatch.setattr(cli, "_setup_runtime", lambda *_args: None)
-    monkeypatch.setattr(cli, "load_config", lambda *_args: {})
-    monkeypatch.setattr(cli, "BiocondaRepo", Repo)
+    monkeypatch.setattr("bioconda_utils.config.load_config", lambda *_args: {})
+    monkeypatch.setattr("bioconda_utils.githandler.BiocondaRepo", Repo)
     monkeypatch.setattr(autobump, "RecipeSource", RecipeSource)
     monkeypatch.setattr(autobump, "Scanner", Scanner)
 
@@ -502,8 +505,7 @@ def test_lint_list_checks_allows_missing_paths(monkeypatch):
 def test_lint_logs_exceptions_without_pdb(monkeypatch, caplog, tmp_path):
     monkeypatch.setattr(cli, "_setup_runtime", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        cli,
-        "load_config",
+        "bioconda_utils.config.load_config",
         lambda path: (_ for _ in ()).throw(RuntimeError("bad")),
     )
 
@@ -517,8 +519,7 @@ def test_handle_merged_pr_accepts_single_git_ref(monkeypatch):
     calls = []
     monkeypatch.setattr(cli, "_setup_runtime", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        cli,
-        "upload_pr_artifacts",
+        "bioconda_utils.containers.artifacts.upload_pr_artifacts",
         lambda repo, ref, **kwargs: calls.append(ref) or cli.UploadResult.SUCCESS,
     )
 
@@ -533,7 +534,9 @@ def test_shared_runtime_options_are_applied(monkeypatch):
     logger_calls = []
     thread_calls = []
     monkeypatch.setattr(cli, "setup_logger", lambda *args: logger_calls.append(args))
-    monkeypatch.setattr(cli, "set_max_threads", thread_calls.append)
+    monkeypatch.setattr(
+        "bioconda_utils.support.parallel.set_max_threads", thread_calls.append
+    )
     cli._setup_runtime(
         loglevel="warning",
         log_command_max_lines=12,

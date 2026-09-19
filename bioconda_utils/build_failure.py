@@ -5,7 +5,7 @@ import time
 from collections.abc import Iterator
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import networkx as nx
 import ruamel.yaml
@@ -14,7 +14,11 @@ from ruamel.yaml import YAML, CommentedMap
 from ruamel.yaml.scalarstring import LiteralScalarString
 
 from bioconda_utils import graph
-from bioconda_utils._types import ALL_PACKAGE_SUBDIRS, PackageSubdir
+from bioconda_utils._types import (
+    ALL_PACKAGE_SUBDIRS,
+    BuildFailureOutputFormat,
+    PackageSubdir,
+)
 from bioconda_utils.conda.conda_build_bridge import load_meta_fast
 from bioconda_utils.conda.recipes import get_recipes
 from bioconda_utils.conda.repodata import RepoData, get_package_downloads
@@ -29,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def format_link(
     uri: str,
-    fmt: Literal["table", "markdown"],
+    fmt: BuildFailureOutputFormat,
     prefix: str = "",
     label: str = "",
 ) -> str:
@@ -275,7 +279,7 @@ def collect_build_failure_records(
     recipe_folder: Path,
     config: dict[str, Any],
     channel: str,
-    link_fmt: Literal["table", "markdown"] = "table",
+    link_fmt: BuildFailureOutputFormat = "table",
     link_prefix: str = "",
     git_range: GitRange | None = None,
 ) -> list[dict[str, Any]]:

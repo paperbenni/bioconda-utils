@@ -32,6 +32,7 @@ from ._types import (
     ALL_CONTAINER_PLATFORMS,
     ALL_PACKAGE_SUBDIRS,
     ArtifactSource,
+    BuildFailureOutputFormat,
     ContainerPlatform,
     PackageSubdir,
     QuayUploadTarget,
@@ -1909,7 +1910,7 @@ def list_build_failures(
         str, typer.Option("--channel", help="Channel with packages to check")
     ] = "bioconda",
     output_format: Annotated[
-        Literal["table", "markdown"],
+        BuildFailureOutputFormat,
         typer.Option(
             "--output-format",
             help="Human-readable Rich table or exact Markdown serialization.",

@@ -51,6 +51,8 @@ DEFAULT_PRIMARY_PLATFORMS: tuple[PackageSubdir, ...] = (
 )
 #: Application hosting the CI build artifacts a merged pull request produced.
 ArtifactSource = Literal["azure", "circleci", "github-actions"]
+#: Presentation/serialization modes for the build-failure report.
+BuildFailureOutputFormat = Literal["table", "markdown"]
 
 #: Conda repodata subdir notation, including ``noarch``.
 type Subdir = PackageSubdir | Literal["noarch"]

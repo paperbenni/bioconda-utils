@@ -21,10 +21,8 @@ mamba = "2.5.*"
 
 # CLI
 typer = "0.26.*"
-# Logging
-colorlog = "6.*"
-tqdm = "4.67.*"  # Progress monitor
-yaspin = "3.*"
+# Terminal output (single stack: logging + progress + tables)
+rich = "15.*"
 # Recipe YAML parsing
 "ruamel.yaml" = "0.18.*"
 networkx = "3.6.*"  # (networkx>3.3 needs python>=3.10)
@@ -76,9 +74,6 @@ pygithub = "*"
 # caching
 diskcache = "5.*"
 platformdirs = "4.*"
-
-# build failure output
-tabulate = "0.10.*"
 
 # resource reporting for builds
 psutil = "*"

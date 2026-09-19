@@ -1,68 +1,103 @@
 """
 Logging setup and terminal helpers.
 
-Everything that shapes console output lives here: logger configuration,
-progress-bar aware log handlers, and small helpers that keep the
-terminal responsive during long operations.
+All terminal output goes through Rich: console logging on stderr,
+progress bars and spinners on stderr, and data tables on stdout.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
-import sys
-from collections.abc import Collection
+from collections.abc import Collection, Iterable, Iterator, Sized
 from pathlib import Path
-from threading import Event, Thread
+from typing import Any
 
-import tqdm as _tqdm
-from colorlog import ColoredFormatter
-
-from .subproc import run
+from rich.console import Console
+from rich.logging import RichHandler
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
+)
 
 logger = logging.getLogger(__name__)
 
-
-class TqdmHandler(logging.StreamHandler):
-    """Tqdm aware logging StreamHandler
-
-    Passes all log writes through tqdm to allow progress bars and log
-    messages to coexist without clobbering terminal
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # initialise internal tqdm lock so that we can use tqdm.write
-        _tqdm.tqdm(disable=True, total=0)
-
-    def emit(self, record):
-        _tqdm.tqdm.write(self.format(record))
+console = Console()
+err_console = Console(stderr=True)
 
 
-def tqdm(*args, **kwargs):
-    """Wrapper around TQDM handling disable
-
-    Logging is disabled if:
-
-    - ``TERM`` is set to ``dumb``
-    - ``CIRCLECI`` is set to ``true``
-    - the effective log level of the is lower than set via ``loglevel``
-
-    Args:
-      loglevel: logging loglevel (the number, so logging.INFO)
-      logger: local logger (in case it has different effective log level)
-    """
-    term_ok = (
-        sys.stderr.isatty()
-        and os.environ.get("TERM", "") != "dumb"
-        and os.environ.get("CIRCLECI", "") != "true"
-        and os.environ.get("CI", "") != "true"
+def _make_progress() -> Progress:
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        console=err_console,
     )
-    loglevel_ok = kwargs.get("logger", logger).getEffectiveLevel() <= kwargs.get(
-        "loglevel", logging.INFO
-    )
-    kwargs["disable"] = bool(kwargs.get("disable")) or not (term_ok and loglevel_ok)
-    return _tqdm.tqdm(*args, **kwargs)
+
+
+class _SilentProgress:
+    def update(self, _advance: float = 1) -> None:
+        return None
+
+
+@contextlib.contextmanager
+def progress_bar(total: int | None = None, description: str = "") -> Iterator[Any]:
+    """Rich download/item progress on stderr.
+
+    Yields an object with ``update(advance)``. Outside terminals this
+    yields a silent object so callers never branch.
+    """
+    if not err_console.is_terminal:
+        yield _SilentProgress()
+        return
+    progress = _make_progress()
+    with progress:
+        task = progress.add_task(description, total=total)
+        handle = progress
+
+        class _Handle:
+            def update(self, advance: float = 1) -> None:
+                handle.update(task, advance=advance)
+
+        yield _Handle()
+
+
+def track(
+    sequence: Iterable[Any], description: str = "", total: int | None = None
+) -> Iterator[Any]:
+    """Iterate with Rich progress on stderr, plain iteration when redirected."""
+    if total is None and isinstance(sequence, Sized):
+        total = len(sequence)
+    if not err_console.is_terminal:
+        yield from sequence
+        return
+    progress = _make_progress()
+    with progress:
+        task = progress.add_task(description, total=total)
+        for item in sequence:
+            yield item
+            progress.update(task, advance=1)
+
+
+@contextlib.contextmanager
+def status(message: str) -> Iterator[None]:
+    """Rich spinner status on stderr, no-op when redirected."""
+    if not err_console.is_terminal:
+        yield
+        return
+    with err_console.status(message):
+        yield
 
 
 class LogFuncFilter:
@@ -71,10 +106,10 @@ class LogFuncFilter:
     Arguments:
       func: The function for which to filter log messages
       trunc_msg: The message to emit when logging is truncated, to inform user that
-                 messages will from now on be hidden.
+                  messages will from now on be hidden.
       max_lines: Max number of log messages to allow to pass
       consecutive: If true, filter applies to consecutive messages and resets
-                     if a message from a different source is encountered.
+                      if a message from a different source is encountered.
 
     Fixme:
       The implementation  assumes that **func** uses a logger initialized with
@@ -133,22 +168,16 @@ def setup_logger(
     logfile: Path | None = None,
     logfile_level: str | int = logging.DEBUG,
     log_command_max_lines=None,
-    prefix: str = "BIOCONDA ",
-    msgfmt: str = (
-        "%(asctime)s %(log_color)s%(name)s %(levelname)s%(reset)s %(message)s"
-    ),
-    datefmt: str = "%H:%M:%S",
 ) -> logging.Logger:
-    """Set up logging for bioconda-utils
+    """Set up logging for bioconda-utils using Rich on stderr.
 
     Args:
       name: Module name for which to get a logger (``__name__``)
       loglevel: Log level, can be name or int level
       logfile: File to log to as well
       logfile_level: Log level for file logging
-      prefix: Prefix to add to our log messages
-      msgfmt: Format for messages
-      datefmt: Format for dates
+      log_command_max_lines: Truncate ``support.subproc.run`` output after
+        this many lines.
 
     Returns:
       A new logger
@@ -163,54 +192,43 @@ def setup_logger(
             logfile_level = getattr(logging, logfile_level.upper())
         log_file_handler = logging.FileHandler(logfile)
         log_file_handler.setLevel(logfile_level)
-        log_file_formatter = logging.Formatter(
-            msgfmt.replace("%(log_color)s", "")
-            .replace("%(reset)s", "")
-            .format(prefix=prefix),
-            datefmt=None,
+        log_file_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s %(name)s %(levelname)s %(message)s",
+                datefmt="%H:%M:%S",
+            )
         )
-        log_file_handler.setFormatter(log_file_formatter)
         root_logger.addHandler(log_file_handler)
     else:
         logfile_level = logging.FATAL
 
     if isinstance(loglevel, str):
         loglevel = getattr(logging, loglevel.upper())
+    if isinstance(logfile_level, str):
+        logfile_level = getattr(logging, logfile_level.upper())
 
-    # Base logger is set to the lowest of console or file logging
     root_logger.setLevel(min(loglevel, logfile_level))
 
-    # Console logging is passed through TqdmHandler so that the progress bar does not
-    # get broken by log lines emitted.
-    log_stream_handler = TqdmHandler()
-    if loglevel:
-        log_stream_handler.setLevel(loglevel)
-
-    log_stream_handler.setFormatter(
-        ColoredFormatter(
-            msgfmt.format(prefix=prefix),
-            datefmt=datefmt,
-            reset=True,
-            log_colors={
-                "DEBUG": "cyan",
-                "INFO": "green",
-                "WARNING": "yellow",
-                "ERROR": "red",
-                "CRITICAL": "red",
-            },
-        )
+    rich_handler = RichHandler(
+        console=err_console,
+        rich_tracebacks=True,
+        markup=True,
+        show_time=True,
+        show_path=False,
+        omit_repeated_times=False,
+        log_time_format="[%H:%M:%S]",
     )
-    log_stream_handler.addFilter(LoggingSourceRenameFilter())
-    root_logger.addHandler(log_stream_handler)
+    rich_handler.setLevel(loglevel)
+    rich_handler.addFilter(LoggingSourceRenameFilter())
+    root_logger.addHandler(rich_handler)
 
-    # Add filter for `utils.run` to truncate after n lines emitted.
-    # We do this here rather than in `utils.run` so that it can be configured
-    # from the CLI more easily
     if log_command_max_lines is not None:
+        from .subproc import run
+
         log_filter = LogFuncFilter(
             run, "Command output truncated", log_command_max_lines
         )
-        log_stream_handler.addFilter(log_filter)
+        rich_handler.addFilter(log_filter)
 
     return new_logger
 
@@ -225,7 +243,7 @@ def ellipsize_recipes(
       recipe_folder: Folder name to strip from recipes.
       n: Show at most this number of recipes, with "..." if more are found.
       m: Don't show anything if more recipes than this
-         (pointless to show first 5 of 5000)
+          (pointless to show first 5 of 5000)
     Returns:
       A string like " (htslib, samtools, ...)" or ""
     """
@@ -242,23 +260,3 @@ def ellipsize_recipes(
         + append
         + ")"
     )
-
-
-class Progress:
-    def __init__(self):
-        self.thread = Thread(target=self.progress)
-        self.stop = Event()
-
-    def progress(self):
-        while not self.stop.wait(60):
-            print(".", end="")
-            sys.stdout.flush()
-        print()
-
-    def __enter__(self):
-        self.thread.start()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.stop.set()
-        self.thread.join()

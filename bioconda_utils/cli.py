@@ -15,17 +15,18 @@ from functools import partial
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-import click
 import networkx as nx
-import pandas
 import requests
 import typer
 from networkx.drawing.nx_pydot import write_dot
+from rich.markdown import Markdown
+from rich.table import Table
 
 from bioconda_utils import bulk
 from bioconda_utils.build_failure import (
+    BUILD_FAILURE_COLUMNS,
     BuildFailureRecord,
-    collect_build_failure_dataframe,
+    collect_build_failure_records,
 )
 from bioconda_utils.containers.artifacts import (
     ArtifactSource,
@@ -60,7 +61,7 @@ from .containers.container_manifests import (
     resolve_registry_creds,
 )
 from .githandler import BiocondaRepo, GitRange, install_gpg_key
-from .support.logsetup import ellipsize_recipes, setup_logger
+from .support.logsetup import console, ellipsize_recipes, err_console, setup_logger
 from .support.parallel import parallel_iter, set_max_threads
 from .support.subproc import bin_for, run
 
@@ -82,7 +83,7 @@ app = typer.Typer(
     help="Utilities for building and maintaining Bioconda recipes.",
     no_args_is_help=True,
     pretty_exceptions_show_locals=False,
-    rich_markup_mode=None,
+    rich_markup_mode="rich",
 )
 logger = logging.getLogger(__name__)
 
@@ -338,7 +339,7 @@ def _setup_runtime(
 
 def _version_callback(value: bool) -> None:
     if value:
-        typer.echo(f"This is bioconda-utils version {VERSION}")
+        console.print(f"This is bioconda-utils version {VERSION}")
         raise typer.Exit()
 
 
@@ -362,15 +363,20 @@ def diagnostics() -> None:
     """Print details about the active Bioconda build environment."""
     config = load_conda_build_config()
 
-    typer.echo(f"bioconda-utils version: {VERSION}")
-    typer.echo(f"package subdir: {config.subdir}")
-    typer.echo(f"conda-build root: {config.croot}")
-    typer.echo("conda-build configuration files:")
+    console.print(f"bioconda-utils version: {VERSION}", markup=False)
+    console.print(f"package subdir: {config.subdir}", markup=False)
+    console.print(f"conda-build root: {config.croot}", markup=False)
+    console.print("conda-build configuration files:")
     for filename in config.exclusive_config_files or []:
         path = Path(filename)
-        typer.echo(f"{path}:")
+        console.print(f"{path}:", markup=False, highlight=False)
         contents = path.read_text(encoding="utf-8")
-        typer.echo(contents, nl=not contents.endswith("\n"))
+        console.print(
+            contents,
+            end="" if contents.endswith("\n") else "\n",
+            markup=False,
+            highlight=False,
+        )
 
 
 @app.command("build")
@@ -726,20 +732,30 @@ def dag(
             if len(s) == 1:
                 singletons.extend(s)
                 continue
-            print(f"# subdag {i}")
+            console.print(f"# subdag {i}", markup=False)
             subdag = dag.subgraph(s)
             recipes = [
                 recipe
                 for package in nx.topological_sort(subdag)
                 for recipe in name2recipes[package]
             ]
-            print("\n".join(map(os.fspath, recipes)) + "\n")
+            console.print(
+                "\n".join(map(os.fspath, recipes)) + "\n",
+                end="",
+                markup=False,
+                highlight=False,
+            )
         if not hide_singletons:
-            print("# singletons")
+            console.print("# singletons", markup=False)
             recipes = [
                 recipe for package in singletons for recipe in name2recipes[package]
             ]
-            print("\n".join(map(os.fspath, recipes)) + "\n")
+            console.print(
+                "\n".join(map(os.fspath, recipes)) + "\n",
+                end="",
+                markup=False,
+                highlight=False,
+            )
 
 
 @app.command("dependent")
@@ -775,11 +791,11 @@ def dependent(
     """Print recipes dependent on a package"""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
     if dependencies and reverse_dependencies:
-        raise click.UsageError(
+        raise typer.BadParameter(
             "`dependencies` and `reverse_dependencies` are mutually exclusive"
         )
     if not any([dependencies, reverse_dependencies]):
-        raise click.UsageError(
+        raise typer.BadParameter(
             "One of `--dependencies` or `--reverse-dependencies` is required."
         )
     config_data = load_config(config)
@@ -793,7 +809,7 @@ def dependent(
     pkgs = []
     for pkg in selected_packages:
         pkgs.extend(dependency_func(d, pkg))
-    print("\n".join(sorted(set(pkgs))))
+    console.print("\n".join(sorted(set(pkgs))), markup=False, highlight=False)
 
 
 @app.command("lint")
@@ -834,13 +850,17 @@ def lint(
 ) -> None:
     """Lint recipes
 
-    Reports a TSV of linting results to stdout."""
+    Reports linting results to stdout."""
     _setup_runtime(loglevel, logfile, logfile_level, log_command_max_lines)
     package_patterns: PackagePatterns = packages or ["*"]
     try:
         parsed_git_range = _parse_git_range_if_needed(git_range)
         if list_checks:
-            print("\n".join(str(check) for check in _lint.get_checks()))
+            console.print(
+                "\n".join(str(check) for check in _lint.get_checks()),
+                markup=False,
+                highlight=False,
+            )
             sys.exit(0)
         _validate_path_exists(recipe_folder)
         _validate_path_exists(config)
@@ -858,14 +878,27 @@ def lint(
         result = linter.lint(recipes, fix=try_fix)
         messages = linter.get_messages()
         if messages:
-            print(
+            console.print(
                 "The following problems have been found (visit https://bioconda.github.io/contributor/linting.html for details on the particular lints you get below.):\n"
             )
-            print(linter.get_report())
+            table = Table(title="Lint results")
+            table.add_column("Severity")
+            table.add_column("Location")
+            table.add_column("Check")
+            table.add_column("Title")
+            for msg in messages:
+                table.add_row(
+                    msg.severity.name,
+                    f"{msg.fname}:{msg.end_line}",
+                    str(msg.check),
+                    msg.title,
+                )
+            console.print(table)
         if not result:
-            print("All checks OK")
+            console.print("All checks OK")
         else:
-            sys.exit("Errors were found")
+            err_console.print("Errors were found", style="red")
+            raise typer.Exit(1)
     except Exception:
         if _handle_pdb_exception("Lint", pdb):
             return
@@ -965,18 +998,22 @@ def duplicates(
         logger.info("  (of which %s are duplicate)", len(dups))
         for spec in dups:
             duplicate[spec].append(candidate_channel)
-    print("\t".join(check_fields + ["channels"]))
+    table = Table(title=f"Duplicate packages in {our_channel}")
+    for field in [*check_fields, "channels"]:
+        table.add_column(field)
     for spec, dup_channels in sorted(duplicate.items()):
         if remove:
             remove_package(spec)
         elif url:
             if not strict_version and (not strict_build):
-                print(f"https://anaconda.org/{our_channel}/{spec[0]}")
-            print(
+                console.print(f"https://anaconda.org/{our_channel}/{spec[0]}")
+            console.print(
                 "https://anaconda.org/{}/{}/files?version={}".format(our_channel, *spec)
             )
         else:
-            print(*spec, ",".join(dup_channels), sep="\t")
+            table.add_row(*[str(part) for part in spec], ",".join(dup_channels))
+    if not url:
+        console.print(table)
 
 
 @app.command("update-pinning")
@@ -1083,18 +1120,22 @@ def update_pinning(
                 hadErrors.add(recip)
             else:
                 logger.info("OK: %s", recip)
-        print("Packages requiring the following:")
-        print(stats)
+        stats_table = Table(title="Packages requiring action")
+        stats_table.add_column("Status")
+        stats_table.add_column("Count", justify="right")
+        for key, value in stats.items():
+            stats_table.add_row(str(key), str(value))
+        console.print(stats_table)
         if num_recipes_needing_bump > max_bumps:
-            print(
+            console.print(
                 f"Only bumped {max_bumps} out of {num_recipes_needing_bump} recipes that needed a build number bump."
             )
         if hadErrors:
-            print(
+            console.print(
                 f"{len(hadErrors)} packages produced an error in conda-build: {list(hadErrors)}"
             )
         if bumpErrors:
-            print(
+            console.print(
                 f"The build numbers in the following recipes could not be incremented: {list(bumpErrors)}"
             )
     except Exception:
@@ -1222,11 +1263,13 @@ def bioconductor_skeleton(
             except (OSError, RuntimeError, ValueError, requests.RequestException):
                 problems.append(k)
         if len(problems):
-            sys.exit(
+            err_console.print(
                 "The following recipes had problems and were not finished: {}".format(
                     ", ".join(problems)
-                )
+                ),
+                style="red",
             )
+            raise typer.Exit(1)
     elif packages:
         for pkg in packages:
             _bioconductor_skeleton.write_recipe(
@@ -1243,9 +1286,10 @@ def bioconductor_skeleton(
                 skip_if_in_channels=skip_if_in_channels,
             )
     else:
-        raise click.UsageError("Either --packages or --update-all must be specified.")
-    sys.stderr.write(
-        "Warning! Make sure to bump bioconductor-data-packages if needed!\n"
+        raise typer.BadParameter("Either --packages or --update-all must be specified.")
+    err_console.print(
+        "Warning! Make sure to bump bioconductor-data-packages if needed!",
+        style="yellow",
     )
 
 
@@ -1804,7 +1848,7 @@ def list_build_failures(
     """List recipes with build failure records"""
     config_data = load_config(config)
     parsed_git_range = _parse_git_range_if_needed(git_range)
-    df = collect_build_failure_dataframe(
+    records = collect_build_failure_records(
         recipe_folder,
         config_data,
         channel,
@@ -1812,12 +1856,23 @@ def list_build_failures(
         link_prefix=link_prefix,
         git_range=parsed_git_range,
     )
-    fmt_writer = (
-        pandas.DataFrame.to_markdown
-        if output_format == "markdown"
-        else pandas.DataFrame.to_string
-    )
-    fmt_writer(df, sys.stdout, index=False)
+    if output_format == "markdown":
+        lines = ["| " + " | ".join(BUILD_FAILURE_COLUMNS) + " |"]
+        lines.append("| " + " | ".join("---" for _ in BUILD_FAILURE_COLUMNS) + " |")
+        for row in records:
+            lines.append(
+                "| "
+                + " | ".join(str(row[column]) for column in BUILD_FAILURE_COLUMNS)
+                + " |"
+            )
+        console.print(Markdown("\n".join(lines)))
+    else:
+        table = Table(title="Build failures")
+        for column in BUILD_FAILURE_COLUMNS:
+            table.add_column(column)
+        for row in records:
+            table.add_row(*[str(row[column]) for column in BUILD_FAILURE_COLUMNS])
+        console.print(table)
 
 
 @app.command("bulk-trigger-ci")

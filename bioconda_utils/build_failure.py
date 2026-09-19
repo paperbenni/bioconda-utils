@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import networkx as nx
-import pandas as pd
 import ruamel.yaml
 import ruamel.yaml.reader
 from ruamel.yaml import YAML, CommentedMap
@@ -20,7 +19,7 @@ from bioconda_utils.conda.conda_build_bridge import load_meta_fast
 from bioconda_utils.conda.recipes import get_recipes
 from bioconda_utils.conda.repodata import RepoData, get_package_downloads
 from bioconda_utils.recipe import Recipe
-from bioconda_utils.support.logsetup import ellipsize_recipes, tqdm
+from bioconda_utils.support.logsetup import ellipsize_recipes, track
 from bioconda_utils.support.subproc import run
 
 from .githandler import BiocondaRepo, GitRange
@@ -267,14 +266,14 @@ BUILD_FAILURE_COLUMNS: list[str] = [
 ]
 
 
-def collect_build_failure_dataframe(
+def collect_build_failure_records(
     recipe_folder: Path,
     config: dict[str, Any],
     channel: str,
     link_fmt: str = "txt",
     link_prefix: str = "",
     git_range: GitRange | None = None,
-) -> pd.DataFrame:
+) -> list[dict[str, Any]]:
     def get_build_failure_records(recipe: Path) -> Iterator[BuildFailureRecord]:
         return filter(
             BuildFailureRecord.exists,
@@ -311,7 +310,7 @@ def collect_build_failure_dataframe(
     dag, _ = graph.build(recipes, config)
 
     def get_data() -> Iterator[dict[str, Any]]:
-        for recipe in tqdm(recipes, desc="Checking recipes"):
+        for recipe in track(recipes, description="Checking recipes"):
             if not has_build_failure(recipe):
                 continue
 
@@ -365,6 +364,7 @@ def collect_build_failure_dataframe(
                     "reason": reasons,
                 }
 
-    data = pd.DataFrame(get_data(), columns=BUILD_FAILURE_COLUMNS)
-    data.sort_values(by=["depending", "downloads"], ascending=False, inplace=True)
+    data = sorted(
+        get_data(), key=lambda row: (row["depending"], row["downloads"]), reverse=True
+    )
     return data

@@ -20,8 +20,7 @@ from collections.abc import Sequence
 from threading import Thread
 from typing import Any
 
-from yaspin import Spinner, yaspin
-from yaspin.spinners import Spinners
+from .logsetup import err_console
 
 logger = logging.getLogger(__name__)
 
@@ -211,8 +210,7 @@ def run(
 
         output_lines = deque()
         if not live:
-            spinner = Spinner(interval=5000, frames=Spinners.dots.frames)
-            with yaspin(spinner, text="running", timer=True):
+            with err_console.status("running", spinner="dots"):
                 handle_output(output_lines)
         else:
             handle_output(output_lines)

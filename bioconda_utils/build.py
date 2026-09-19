@@ -50,7 +50,7 @@ from .conda.repodata import RepoData
 from .config import normalize_config
 from .containers import docker_utils, pkg_test, upload
 from .containers.container_manifests import write_image_record
-from .support.logsetup import Progress
+from .support.logsetup import err_console
 from .support.subproc import allowed_env_var, bin_for, run, sandboxed_env
 
 logger = logging.getLogger(__name__)
@@ -154,11 +154,18 @@ def build(
         logger.info("Linting recipe %s", recipe)
         linter.clear_messages()
         if linter.lint([recipe]):
+            for msg in linter.get_messages():
+                logger.error(
+                    "%s:%s: %s: %s",
+                    msg.fname,
+                    msg.end_line,
+                    msg.check,
+                    msg.title,
+                )
             logger.error(
-                "\n\nThe recipe %s failed linting. See "
-                "https://bioconda.github.io/contributor/linting.html for details:\n\n%s\n",
+                "The recipe %s failed linting. See "
+                "https://bioconda.github.io/contributor/linting.html for details.",
                 recipe,
-                linter.get_report(),
             )
             return BuildResult(False, None)
         logger.info("Lint checks passed")
@@ -236,7 +243,7 @@ def build(
                 for config_file in get_conda_build_config_files():
                     cmd += [config_file.arg, config_file.path]
                 cmd += [os.path.join(recipe, "meta.yaml")]
-                with Progress():
+                with err_console.status("Building recipe..."):
                     run(cmd, live=live_logs)
 
         logger.info(
@@ -408,7 +415,7 @@ def get_worker_subdag(
             working_dag = nx.DiGraph(dag)
             # Only build the current "root" nodes after removing
             for i in range(subdag_depth + 1):
-                print(f"{len(root_nodes)} recipes at depth {i}")
+                logger.info("%s recipes at depth %s", len(root_nodes), i)
                 if len(root_nodes) == 0:
                     break
                 if i < subdag_depth:

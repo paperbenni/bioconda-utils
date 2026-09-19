@@ -110,7 +110,7 @@ import networkx as nx
 from bioconda_utils.skiplist import Skiplist
 
 from .. import recipe as _recipe
-from ..support.logsetup import tqdm
+from ..support.logsetup import track
 from ..support.subproc import run
 
 logger = logging.getLogger(__name__)
@@ -545,12 +545,6 @@ class Linter:
         """Clears the lint messages stored in linter"""
         self._messages = []
 
-    def get_report(self) -> str:
-        return "\n".join(
-            f"{msg.severity.name}: {msg.fname}:{msg.end_line}: {msg.check}: {msg.title}"
-            for msg in self.get_messages()
-        )
-
     def load_skips(self) -> dict[str, list[str]]:
         """Parses lint skips
 
@@ -593,7 +587,7 @@ class Linter:
           True if issues with errors were found
 
         """
-        for recipe_name in tqdm(sorted(recipe_names)):
+        for recipe_name in track(sorted(recipe_names), description="Linting"):
             self.order_and_load_checks()
             try:
                 msgs = self.lint_one(recipe_name, fix=fix)

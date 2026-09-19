@@ -17,7 +17,7 @@ import aioftp
 import aiohttp
 
 from .support import http
-from .support.logsetup import tqdm
+from .support.logsetup import progress_bar
 from .support.parallel import threads_to_use
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -185,7 +185,9 @@ class AsyncPipeline[ITEM]:
     async def show_progress(
         self, in_q: asyncio.Queue[ITEM], out_q: asyncio.Queue[ITEM]
     ) -> None:
-        with tqdm(total=self.get_item_count()) as progress:
+        with progress_bar(
+            total=self.get_item_count(), description="processing"
+        ) as progress:
             while True:
                 try:
                     item = await in_q.get()
@@ -340,7 +342,7 @@ class AsyncRequests:
         assert self.session is not None
         async with self.session.get(url) as resp:
             resp.raise_for_status()
-            async for block in http.stream_download(resp, desc, leave=False):
+            async for block in http.stream_download(resp, desc):
                 checksum.update(block)
         return checksum.hexdigest()
 
@@ -354,7 +356,7 @@ class AsyncRequests:
         async with self.session.get(url) as resp:
             resp.raise_for_status()
             async with aiofiles.open(fname, "wb") as out:
-                async for block in http.stream_download(resp, desc, leave=False):
+                async for block in http.stream_download(resp, desc):
                     await out.write(block)
 
     async def get_ftp_listing(self, url):

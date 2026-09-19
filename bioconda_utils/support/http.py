@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 import aiohttp
 import backoff
 
-from .logsetup import tqdm
+from .logsetup import progress_bar
 
 # Used as user agent in http requests and as requester in github API requests
 USER_AGENT = "bioconda/bioconda-utils"
@@ -63,29 +63,10 @@ async def stream_download(
     resp: aiohttp.ClientResponse,
     desc: str,
     block_size: int = 1024 * 1024,
-    leave: bool = True,
-    disable: bool | None = None,
 ) -> AsyncIterator[bytes]:
-    """Stream the body of **resp** in blocks, showing a progress monitor
-
-    Args:
-      resp: Response to read from
-      desc: Progress monitor label
-      block_size: Size of the blocks yielded
-      leave: Keep the progress monitor visible after completion
-      disable: Disable the progress monitor
-    """
-    size = int(resp.headers.get("Content-Length", 0))
-    with tqdm(
-        total=size,
-        unit="B",
-        unit_scale=True,
-        unit_divisor=1024,
-        desc=desc,
-        miniters=1,
-        leave=leave,
-        disable=disable,
-    ) as progress:
+    """Stream the body of **resp** in blocks, showing Rich progress."""
+    size = int(resp.headers.get("Content-Length", 0)) or None
+    with progress_bar(total=size, description=desc) as progress:
         while True:
             block = await resp.content.read(block_size)
             if not block:

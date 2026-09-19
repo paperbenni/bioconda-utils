@@ -36,7 +36,7 @@ from .._types import (
 )
 from ..support import http
 from ..support.caching import disk_cache
-from ..support.logsetup import tqdm
+from ..support.logsetup import track
 
 logger = logging.getLogger(__name__)
 
@@ -115,13 +115,12 @@ class AsyncRequests:
                 )
                 for url, desc, data, fd in zip_longest(urls, descs, datas, fds)
             ]
-            with tqdm(
-                asyncio.as_completed(coros),
-                total=len(coros),
-                desc="Downloading",
-                unit="files",
-            ) as t:
-                result = [await coro for coro in t]
+            result = [
+                await coro
+                for coro in track(
+                    asyncio.as_completed(coros), description="Downloading"
+                )
+            ]
         return result
 
     @staticmethod
@@ -149,7 +148,6 @@ class AsyncRequests:
                     resp,
                     desc,
                     block_size=1024 * 16,
-                    disable=logger.getEffectiveLevel() > logging.INFO,
                 ):
                     if fd:
                         fd.write(block)

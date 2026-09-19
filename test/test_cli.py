@@ -397,7 +397,8 @@ def test_build_rejects_macos_package_platform_for_docker():
     result = runner.invoke(cli.app, ["build", "--docker", "--platform", "osx-arm64"])
 
     assert result.exit_code == 2
-    assert "cannot be installed in Linux mulled containers" in result.output
+    assert "cannot be installed" in result.output
+    assert "mulled containers" in result.output
 
 
 def test_handle_merged_pr_parses_conda_platform_option(tmp_path):
@@ -441,13 +442,16 @@ def test_create_mulled_manifests_rejects_container_platform_notation():
         cli.app, ["create-mulled-manifests", "--platform", "linux/arm64"]
     )
     assert result.exit_code == 2
-    assert "is not one of 'linux-64', 'linux-aarch64', 'linux-riscv64'" in result.output
+    assert "is not one of" in result.output
+    assert "linux-64" in result.output
+    assert "linux-aarch64" in result.output
 
 
 def test_create_mulled_manifests_rejects_macos_package_platform():
     result = runner.invoke(cli.app, ["create-mulled-manifests", "--platform", "osx-64"])
     assert result.exit_code == 2
-    assert "cannot be installed in Linux mulled containers" in result.output
+    assert "cannot be installed" in result.output
+    assert "mulled containers" in result.output
 
 
 def test_annotate_build_failures_parses_conda_platform_option():

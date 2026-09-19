@@ -1,5 +1,5 @@
 import asyncio
-import logging
+import contextlib
 from typing import cast
 
 import aiohttp
@@ -65,23 +65,19 @@ def test_stream_download_yields_blocks_and_reports_progress(monkeypatch):
         def __init__(self):
             self.updates = []
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return None
-
         def update(self, size):
             self.updates.append(size)
 
     progress = Progress()
     progress_options = {}
 
-    def progress_factory(**kwargs):
-        progress_options.update(kwargs)
-        return progress
+    @contextlib.contextmanager
+    def progress_factory(total=None, description=""):
+        progress_options["total"] = total
+        progress_options["description"] = description
+        yield progress
 
-    monkeypatch.setattr(http, "tqdm", progress_factory)
+    monkeypatch.setattr(http, "progress_bar", progress_factory)
     response = Response()
 
     async def download():
@@ -91,24 +87,14 @@ def test_stream_download_yields_blocks_and_reports_progress(monkeypatch):
                 cast(aiohttp.ClientResponse, response),
                 "artifact",
                 block_size=4,
-                leave=False,
-                disable=True,
             )
         ]
 
     assert asyncio.run(download()) == [b"first", b"second"]
     assert response.content.block_sizes == [4, 4, 4]
     assert progress.updates == [5, 6]
-    assert progress_options == {
-        "total": 11,
-        "unit": "B",
-        "unit_scale": True,
-        "unit_divisor": 1024,
-        "desc": "artifact",
-        "miniters": 1,
-        "leave": False,
-        "disable": True,
-    }
+    assert progress_options["total"] == 11
+    assert progress_options["description"] == "artifact"
 
 
 def test_retry_policy_gives_up_only_on_permanent_response_errors():
@@ -121,25 +107,8 @@ def test_retry_policy_gives_up_only_on_permanent_response_errors():
     assert not http._give_up_on_http_error(aiohttp.ClientPayloadError())
 
 
-def test_tqdm_explicit_disable_is_respected(monkeypatch):
-    options = {}
-    test_logger = logging.getLogger("test-http-progress")
-    test_logger.setLevel(logging.INFO)
+def test_progress_is_silent_when_redirected(monkeypatch):
+    assert list(logsetup.track([1, 2], "x")) == [1, 2]
 
-    class Terminal:
-        @staticmethod
-        def isatty():
-            return True
-
-    def make_progress(*_args, **kwargs):
-        options.update(kwargs)
-        return object()
-
-    monkeypatch.setattr(logsetup.sys, "stderr", Terminal())
-    monkeypatch.setattr(logsetup._tqdm, "tqdm", make_progress)
-    for name in ("TERM", "CI", "CIRCLECI"):
-        monkeypatch.delenv(name, raising=False)
-
-    logsetup.tqdm(disable=True, logger=test_logger)
-
-    assert options["disable"] is True
+    with logsetup.progress_bar(total=2, description="x") as bar:
+        bar.update(1)

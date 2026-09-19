@@ -5,7 +5,6 @@ from __future__ import annotations
 import abc
 import asyncio
 import logging
-import os
 import pickle
 from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 from hashlib import sha256
@@ -261,10 +260,10 @@ class AsyncRequests:
     #: Used as user agent in http requests and as requester in github API requests
     USER_AGENT = http.USER_AGENT
 
-    def __init__(self, cache_fn: str | None = None) -> None:
+    def __init__(self, cache_file: Path | None = None) -> None:
         #: aiohttp session (only exists while running)
         self.session: aiohttp.ClientSession | None = None
-        self.cache_fn = cache_fn
+        self.cache_file = cache_file
         #: cache
         self.cache: dict[str, dict[str, Any]] | None = None
 
@@ -272,9 +271,9 @@ class AsyncRequests:
         session = http.make_session(user_agent=self.USER_AGENT)
         await session.__aenter__()
         self.session = session
-        if self.cache_fn:
-            if os.path.exists(self.cache_fn):
-                cache_data = await asyncio.to_thread(Path(self.cache_fn).read_bytes)
+        if self.cache_file is not None:
+            if self.cache_file.exists():
+                cache_data = await asyncio.to_thread(self.cache_file.read_bytes)
                 self.cache = pickle.loads(cache_data)
             else:
                 self.cache = {}
@@ -286,9 +285,9 @@ class AsyncRequests:
         assert self.session is not None
         await self.session.__aexit__(ext_type, exc, trace)
         self.session = None
-        if self.cache_fn:
+        if self.cache_file is not None:
             cache_data = pickle.dumps(self.cache)
-            await asyncio.to_thread(Path(self.cache_fn).write_bytes, cache_data)
+            await asyncio.to_thread(self.cache_file.write_bytes, cache_data)
 
     @http.retry_on_transient
     async def get_text_from_url(self, url: str) -> str:

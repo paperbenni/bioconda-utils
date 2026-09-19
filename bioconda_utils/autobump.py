@@ -45,7 +45,6 @@ from __future__ import annotations
 import abc
 import asyncio
 import logging
-import os
 import pickle
 import random
 from collections import Counter, defaultdict
@@ -171,11 +170,11 @@ class RecipeGraphSource(RecipeSource):
         exclude: list[str],
         shuffle: bool,
         config: dict[str, str],
-        cache_fn: str | None = None,
+        cache_file: Path | None = None,
     ) -> None:
         super().__init__(recipe_base, packages, exclude, shuffle)
         self.config = config
-        self.cache_fn = cache_fn
+        self.cache_file = cache_file
         self.shuffle = shuffle
         self.dag = self.load_graph()
         self.dag = graph.filter_recipe_dag(self.dag, self.packages, exclude)
@@ -207,9 +206,8 @@ class RecipeGraphSource(RecipeSource):
         return len(self.dag)
 
     def load_graph(self) -> nx.DiGraph:
-        if self.cache_fn and os.path.exists(self.cache_fn):
-            with open(self.cache_fn, "rb") as stream:
-                dag = pickle.load(stream)
+        if self.cache_file is not None and self.cache_file.exists():
+            dag = pickle.loads(self.cache_file.read_bytes())
         else:
             blacklist = Skiplist(self.config, self.recipe_base)
             dag = graph.build_from_recipes(
@@ -217,9 +215,8 @@ class RecipeGraphSource(RecipeSource):
                 for recipe in recipes_load_parallel_iter(self.recipe_base, ["*"])
                 if not blacklist.is_skiplisted(recipe)
             )
-            if self.cache_fn:
-                with open(self.cache_fn, "wb") as stream:
-                    pickle.dump(dag, stream)
+            if self.cache_file is not None:
+                self.cache_file.write_bytes(pickle.dumps(dag))
         return dag
 
 
@@ -228,15 +225,15 @@ class Scanner(AsyncPipeline[Recipe]):
 
     Arguments:
       recipe_source: Iteratable providing Recipe stubs
-      cache_fn: Filename prefix for caching
-      status_fn: Filename for status output
+      cache_file: Filename prefix for caching
+      status_file: Filename for status output
     """
 
     def __init__(
         self,
         recipe_source: RecipeSource,
-        cache_fn: str | None = None,
-        status_fn: Path | None = None,
+        cache_file: Path | None = None,
+        status_file: Path | None = None,
     ) -> None:
         super().__init__()
         #: recipe source
@@ -246,9 +243,9 @@ class Scanner(AsyncPipeline[Recipe]):
         #: collect end status for each recipe
         self.status: list[tuple[str, EndProcessingItem]] = []
         #: filename to write statuses to
-        self.status_fn = status_fn
+        self.status_file = status_file
         #: async requests helper
-        self.req = AsyncRequests(cache_fn)
+        self.req = AsyncRequests(cache_file)
 
     def run(self) -> None:
         """Runs scanner"""
@@ -265,8 +262,8 @@ class Scanner(AsyncPipeline[Recipe]):
             for key, value in self.stats.most_common():
                 logger.info("%s: %s", key, value)
             logger.info("SUM: %i", sum(self.stats.values()))
-            if self.status_fn:
-                with open(self.status_fn, "w") as out:
+            if self.status_file is not None:
+                with open(self.status_file, "w") as out:
                     out.writelines(
                         f"{rname}\t{result.name}\n" for rname, result in self.status
                     )

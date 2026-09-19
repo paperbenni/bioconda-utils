@@ -1288,7 +1288,7 @@ def autobump(
         ),
     ] = None,
     cache: Annotated[
-        str | None,
+        Path | None,
         typer.Option(
             "--cache",
             help="To speed up debugging, use repodata cached locally in\n     the provided filename. If the file does not exist, it will be created\n     the first time. Caution: The cache will not be updated if\n     exclude-channels is changed",
@@ -1430,13 +1430,13 @@ def autobump(
                 exclude or [],
                 not no_shuffle,
                 config_dict,
-                cache_fn=cache and cache + "_dag.pkl",
+                cache_file=Path(f"{cache}_dag.pkl") if cache is not None else None,
             )
         # Setup scanning pipeline
         scanner = autobump.Scanner(
             recipe_source,
-            cache_fn=cache and cache + "_scan.pkl",
-            status_fn=recipe_status,
+            cache_file=Path(f"{cache}_scan.pkl") if cache is not None else None,
+            status_file=recipe_status,
         )
 
         # Always exclude recipes that were explicitly disabled

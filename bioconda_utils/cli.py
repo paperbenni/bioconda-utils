@@ -46,25 +46,6 @@ warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 # callables and the parameter types above, so importing the rest eagerly made
 # every invocation pay about a second for modules it never used.
 
-#: Modules that are imported on demand but kept reachable as attributes of this
-#: module for callers that introspect or monkeypatch them.
-_LAZY_MODULE_ATTRIBUTES: dict[str, tuple[str, str | None]] = {
-    "graph": ("bioconda_utils.graph", None),
-    "_lint": ("bioconda_utils.lint", None),
-    "GitRange": ("bioconda_utils.githandler", "GitRange"),
-    "UploadResult": ("bioconda_utils.containers.artifacts", "UploadResult"),
-}
-
-
-def __getattr__(name: str) -> Any:
-    """Resolve lazily-imported submodules and classes (PEP 562)."""
-    try:
-        module_name, attribute = _LAZY_MODULE_ATTRIBUTES[name]
-    except KeyError:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
-    module = importlib.import_module(module_name)
-    return module if attribute is None else getattr(module, attribute)
-
 
 def is_stable_version(version: str) -> bool:
     return re.match(r"^\d+\.\d+\.\d+$", version) is not None

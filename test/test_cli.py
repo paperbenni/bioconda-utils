@@ -11,6 +11,8 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 from bioconda_utils import cli
+from bioconda_utils.containers.artifacts import UploadResult
+from bioconda_utils.githandler import GitRange
 
 runner = CliRunner()
 
@@ -201,7 +203,9 @@ def test_dag_hides_singletons(monkeypatch, tmp_path):
     name2recipes = {name: {Path("recipes") / name} for name in package_dag.nodes}
     monkeypatch.setattr("bioconda_utils.config.load_config", lambda _: {})
     monkeypatch.setattr(cli, "get_recipes", lambda *_: [])
-    monkeypatch.setattr(cli.graph, "build", lambda *_: (package_dag, name2recipes))
+    monkeypatch.setattr(
+        "bioconda_utils.graph.build", lambda *_: (package_dag, name2recipes)
+    )
 
     result = runner.invoke(
         cli.app,
@@ -229,7 +233,7 @@ def test_dag_hides_singletons(monkeypatch, tmp_path):
     ],
 )
 def test_git_range_parsing(spec, base, ref):
-    parsed = cli.GitRange.parse(spec)
+    parsed = GitRange.parse(spec)
 
     assert parsed.base == base
     assert parsed.ref == ref
@@ -242,11 +246,11 @@ def test_git_range_parsing(spec, base, ref):
 )
 def test_invalid_git_ranges_are_rejected(spec):
     with pytest.raises(ValueError):
-        cli.GitRange.parse(spec)
+        GitRange.parse(spec)
 
 
 def test_cli_rejects_two_dot_git_range(monkeypatch):
-    monkeypatch.setattr(cli._lint, "get_checks", list)
+    monkeypatch.setattr("bioconda_utils.lint.get_checks", list)
 
     result = runner.invoke(
         cli.app, ["lint", "--list-checks", "--git-range", "main..HEAD"]
@@ -302,9 +306,7 @@ def test_recipe_selection_uses_range_base_and_ref(monkeypatch):
 
     monkeypatch.setattr("bioconda_utils.githandler.BiocondaRepo", Repo)
 
-    result = cli.get_recipes_to_build(
-        cli.GitRange.parse("main...feature"), Path("recipes")
-    )
+    result = cli.get_recipes_to_build(GitRange.parse("main...feature"), Path("recipes"))
 
     assert result == [Path("recipes/example")]
     assert calls == [("feature", "main")]
@@ -491,7 +493,7 @@ def test_build_uses_environment_aware_mulled_image_default():
 
 
 def test_lint_list_checks_allows_missing_paths(monkeypatch):
-    monkeypatch.setattr(cli._lint, "get_checks", lambda: ["first", "second"])
+    monkeypatch.setattr("bioconda_utils.lint.get_checks", lambda: ["first", "second"])
 
     result = runner.invoke(
         cli.app,
@@ -520,7 +522,7 @@ def test_handle_merged_pr_accepts_single_git_ref(monkeypatch):
     monkeypatch.setattr(cli, "_setup_runtime", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         "bioconda_utils.containers.artifacts.upload_pr_artifacts",
-        lambda repo, ref, **kwargs: calls.append(ref) or cli.UploadResult.SUCCESS,
+        lambda repo, ref, **kwargs: calls.append(ref) or UploadResult.SUCCESS,
     )
 
     with pytest.raises(SystemExit) as exc_info:

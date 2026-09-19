@@ -57,6 +57,10 @@ markers = [
 ]
 python_files = ["test/test_*py"]
 
+[tool.ruff]
+# pixi.toml pins python = "3.13.*"
+target-version = "py313"
+
 [tool.flake8]
 max_line_length = 99
 exclude = [".git", "__pycache__", "docs/source/conf.py"]

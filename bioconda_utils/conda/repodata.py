@@ -20,7 +20,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from itertools import product, zip_longest
 from multiprocessing.pool import ThreadPool
-from typing import ClassVar, TypeAlias, cast
+from typing import ClassVar, cast
 
 import aiofiles
 import aiohttp
@@ -45,7 +45,7 @@ class BiocondaUtilsWarning(UserWarning):
     pass
 
 
-RepoDataKey: TypeAlias = tuple[str, Subdir]
+type RepoDataKey = tuple[str, Subdir]
 
 
 @dataclass
@@ -81,12 +81,10 @@ class AsyncRequests:
               Use to e.g. offload json parsing into download loop.
         """
         try:
-            loop = asyncio.get_event_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        if loop.is_running():
+            pass
+        else:
             logger.warning("Running AsyncRequests.fetch from within running loop")
             # Workaround the fact that asyncio's loop is marked as not-reentrant
             # (it is apparently easy to patch, but not desired by the devs,
@@ -94,16 +92,9 @@ class AsyncRequests:
                 res = pool.apply(cls.fetch, (urls, descs, cb, datas))
             return res
 
-        task = asyncio.ensure_future(cls.async_fetch(urls, descs, cb, datas))
-
-        try:
-            loop.run_until_complete(task)
-        except KeyboardInterrupt:
-            task.cancel()
-            loop.run_forever()
-            task.exception()
-
-        return task.result()
+        # asyncio.run cancels the fetch on SIGINT before raising
+        # KeyboardInterrupt, so pending connections close cleanly
+        return asyncio.run(cls.async_fetch(urls, descs, cb, datas))
 
     @classmethod
     async def async_fetch(cls, urls, descs=None, cb=None, datas=None, fds=None):

@@ -255,7 +255,7 @@ class Scanner(AsyncPipeline[Recipe]):
         logger.info("Running pipeline with these steps:")
         for n, filt in enumerate(self.filters):
             logger.info(" %i. %s", n + 1, filt.get_info())
-        res = super().run()
+        super().run()
         logger.info("")
         logger.info("Recipe status statistics:")
         for key, value in self.stats.most_common():
@@ -266,7 +266,6 @@ class Scanner(AsyncPipeline[Recipe]):
                 out.writelines(
                     f"{rname}\t{result.name}\n" for rname, result in self.status
                 )
-        return res
 
     async def queue_items(
         self, send_q: asyncio.Queue[Recipe], return_q: asyncio.Queue[Recipe]
@@ -811,18 +810,19 @@ class FetchUpstreamDependencies(Filter):
         self.build_config: conda_build.config.Config = load_conda_build_config()
 
     async def apply(self, recipe: Recipe) -> None:
-        await asyncio.gather(
-            *[
-                data["hoster"].get_deps(
-                    self.pipeline, self.build_config, recipe.name, data
-                )
-                for r in (recipe, recipe.orig)
-                for fn, data in r.version_data.items()
-                if "depends" not in data
-                and "hoster" in data
-                and hasattr(data["hoster"], "get_deps")
-            ]
-        )
+        async with asyncio.TaskGroup() as tg:
+            for r in (recipe, recipe.orig):
+                for data in r.version_data.values():
+                    if (
+                        "depends" not in data
+                        and "hoster" in data
+                        and hasattr(data["hoster"], "get_deps")
+                    ):
+                        tg.create_task(
+                            data["hoster"].get_deps(
+                                self.pipeline, self.build_config, recipe.name, data
+                            )
+                        )
 
 
 class UpdateChecksums(Filter):

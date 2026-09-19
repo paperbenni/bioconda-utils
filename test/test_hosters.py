@@ -29,12 +29,6 @@ def test_hoster_has_test_case(hoster):
     assert hoster.__name__ in TEST_CASES, f"Missing test cases for {hoster.__name__}"
 
 
-@pytest.fixture
-def event_loop():
-    loop = asyncio.get_event_loop()
-    yield loop
-
-
 @pytest.fixture(scope="class")
 def setup_params(request):
     request.cls.setup_params(*request.param)
@@ -115,12 +109,11 @@ class TestHoster:
     async def get_file_from_url(self, fname: str, url: str, desc: str) -> None:
         pass
 
-    @pytest.mark.asyncio
-    def test_get_version(self, event_loop):
+    def test_get_version(self):
         if "release_links" not in self.case and "release_json" not in self.case:
             pytest.xfail("No release_links or release_json in test case")
 
-        versions_data = event_loop.run_until_complete(
+        versions_data = asyncio.run(
             self.instance.get_versions(self, self.case["version"])
         )
         versions = [item["version"] for item in versions_data]

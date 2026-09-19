@@ -9,7 +9,6 @@ from typing import (
     NamedTuple,
     NewType,
     Protocol,
-    TypeAlias,
     TypedDict,
 )
 
@@ -51,11 +50,11 @@ DEFAULT_PRIMARY_PLATFORMS: tuple[PackageSubdir, ...] = (
     PackageSubdir.OSX_64,
 )
 #: Conda repodata subdir notation, including ``noarch``.
-Subdir: TypeAlias = PackageSubdir | Literal["noarch"]
+type Subdir = PackageSubdir | Literal["noarch"]
 #: A two-part OS label -- the form conda-build's ``config.platform`` and its
 #: ``DEFAULT_COMPILERS`` table require (see ``conda_build.variants``). This is
 #: *not* a subdir: ``"linux-64"`` is not a valid ``OsLabel``.
-OsLabel: TypeAlias = Literal["linux", "osx"]
+type OsLabel = Literal["linux", "osx"]
 QuayUploadTarget = NewType("QuayUploadTarget", str)
 
 #: Architecture-equivalent Linux package/container platforms. Keep this as the

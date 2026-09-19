@@ -225,6 +225,32 @@ def test_dag_hides_singletons(monkeypatch, tmp_path):
     assert "singleton" not in result.output
 
 
+def test_dag_text_output_does_not_wrap_recipe_paths(monkeypatch, tmp_path):
+    recipe_folder = tmp_path / "recipes"
+    recipe_folder.mkdir()
+    config = tmp_path / "config.yml"
+    config.write_text("{}")
+    long_recipe = Path("recipes") / ("very-long-recipe-name-" * 6)
+    package_dag = nx.DiGraph([("dependency", "package")])
+    name2recipes = {
+        "dependency": {Path("recipes/dependency")},
+        "package": {long_recipe},
+    }
+    monkeypatch.setattr("bioconda_utils.config.load_config", lambda _: {})
+    monkeypatch.setattr(cli, "get_recipes", lambda *_: [])
+    monkeypatch.setattr(
+        "bioconda_utils.graph.build", lambda *_: (package_dag, name2recipes)
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["dag", str(recipe_folder), str(config), "--output-format", "txt"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert str(long_recipe) in result.output.splitlines()
+
+
 @pytest.mark.parametrize(
     ("spec", "base", "ref"),
     [
@@ -359,6 +385,82 @@ def test_autobump_closes_git_handler_on_keyboard_interrupt(monkeypatch):
         )
 
     assert closed == [True]
+
+
+def test_autobump_builds_all_cache_paths_from_path_prefix(monkeypatch, tmp_path):
+    from bioconda_utils import autobump
+
+    added_filters = []
+    scanner_arguments = []
+
+    class RecipeSource:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+    class Scanner:
+        def __init__(self, *_args, **kwargs):
+            scanner_arguments.append(kwargs)
+
+        def add(self, *args, **_kwargs):
+            added_filters.append(args)
+
+        def run(self):
+            pass
+
+    monkeypatch.setattr(cli, "_setup_runtime", lambda *_args: None)
+    monkeypatch.setattr("bioconda_utils.config.load_config", lambda *_args: {})
+    monkeypatch.setattr(autobump, "RecipeSource", RecipeSource)
+    monkeypatch.setattr(autobump, "Scanner", Scanner)
+
+    cache = tmp_path / "autobump-cache"
+    cli.autobump(
+        cache=cache,
+        no_follow_graph=True,
+        ignore_skiplists=True,
+        exclude_channels=["conda-forge"],
+        no_check_pinnings=True,
+        no_check_version_update=True,
+    )
+
+    assert scanner_arguments == [
+        {"cache_file": Path(f"{cache}_scan.pkl"), "status_file": None}
+    ]
+    exclude_call = next(
+        call for call in added_filters if call[0] is autobump.ExcludeOtherChannel
+    )
+    assert exclude_call[2] == Path(f"{cache}_repodata.txt")
+
+
+def test_list_build_failures_markdown_is_written_verbatim(monkeypatch, tmp_path):
+    from bioconda_utils.build_failure import BUILD_FAILURE_COLUMNS
+
+    recipe_folder = tmp_path / "recipes"
+    recipe_folder.mkdir()
+    config = tmp_path / "config.yml"
+    config.write_text("{}")
+    row = {column: f"value-{column}" for column in BUILD_FAILURE_COLUMNS}
+    row["build failures"] = "[linux-64](failures/linux-64.yaml)"
+    monkeypatch.setattr("bioconda_utils.config.load_config", lambda *_args: {})
+    monkeypatch.setattr(
+        "bioconda_utils.build_failure.collect_build_failure_records",
+        lambda *_args, **_kwargs: [row],
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "list-build-failures",
+            str(recipe_folder),
+            str(config),
+            "--output-format",
+            "markdown",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("| recipe | downloads |")
+    assert "[linux-64](failures/linux-64.yaml)" in result.output
+    assert "─" not in result.output
 
 
 def test_build_parses_typed_platform_option():

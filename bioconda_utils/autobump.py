@@ -321,7 +321,9 @@ class ExcludeOtherChannel(Filter):
         template = "builds package found in other channel(s)"
         level = logging.DEBUG
 
-    def __init__(self, scanner: Scanner, channels: Sequence[str], cache: str) -> None:
+    def __init__(
+        self, scanner: Scanner, channels: Sequence[str], cache: Path | None
+    ) -> None:
         super().__init__(scanner)
         self.channels = channels
         logger.info("Loading package lists for %s", channels)

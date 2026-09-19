@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import logging
 from typing import cast
 
 import aiohttp
@@ -112,3 +113,12 @@ def test_progress_is_silent_when_redirected(monkeypatch):
 
     with logsetup.progress_bar(total=2, description="x") as bar:
         bar.update(1)
+
+
+def test_logger_treats_subprocess_output_as_literal_text():
+    logger = logsetup.setup_logger("test-literal-logging", logging.INFO)
+
+    # Rich markup would suppress the first value and raise MarkupError for the
+    # second one. Logging arbitrary command output must never interpret either.
+    logger.info("[not-a-style]")
+    logger.info("unmatched closing tag [/bold]")

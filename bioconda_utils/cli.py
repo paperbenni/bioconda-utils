@@ -1,4 +1,9 @@
-"""Bioconda Utils command-line interface built with Typer."""
+"""Bioconda Utils command-line interface built with Typer.
+
+Exact text results are written through :func:`_write_output` (streaming graph
+serializers receive stdout directly). Human-facing reports use Rich on stdout,
+while logs, progress, and errors use stderr.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +23,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import typer
+from rich.syntax import Syntax
 from rich.table import Table
+from rich.text import Text
 
 from . import __version__ as VERSION
 from ._types import (
@@ -32,7 +39,9 @@ from ._types import (
     parse_quay_upload_target,
 )
 from .containers.pkg_test import CREATE_ENV_IMAGE
-from .support.logsetup import console, ellipsize_recipes, err_console, setup_logger
+from .support.logsetup import console as report_console
+from .support.logsetup import ellipsize_recipes, setup_logger
+from .support.logsetup import err_console as error_console
 
 if TYPE_CHECKING:
     # Annotation-only: imported lazily inside the functions that need it.
@@ -65,6 +74,17 @@ app = typer.Typer(
     rich_markup_mode="rich",
 )
 logger = logging.getLogger(__name__)
+
+
+def _write_output(text: str) -> None:
+    """Write an exact command result to stdout.
+
+    Use this for serialized formats and line-oriented output consumed by
+    another command. Human-facing reports use ``report_console`` instead;
+    logs, progress, and errors belong on stderr.
+    """
+    sys.stdout.write(text)
+
 
 # A package is the name of the software package, like `bowtie`.
 #
@@ -330,7 +350,7 @@ def _setup_runtime(
 
 def _version_callback(value: bool) -> None:
     if value:
-        console.print(f"This is bioconda-utils version {VERSION}")
+        _write_output(f"This is bioconda-utils version {VERSION}\n")
         raise typer.Exit()
 
 
@@ -356,19 +376,30 @@ def diagnostics() -> None:
 
     config = load_conda_build_config()
 
-    console.print(f"bioconda-utils version: {VERSION}", markup=False)
-    console.print(f"package subdir: {config.subdir}", markup=False)
-    console.print(f"conda-build root: {config.croot}", markup=False)
-    console.print("conda-build configuration files:")
+    report_console.print(
+        Text.assemble(("bioconda-utils version: ", "bold cyan"), VERSION),
+        soft_wrap=True,
+    )
+    report_console.print(
+        Text.assemble(("package subdir: ", "bold cyan"), str(config.subdir)),
+        soft_wrap=True,
+    )
+    report_console.print(
+        Text.assemble(("conda-build root: ", "bold cyan"), str(config.croot)),
+        soft_wrap=True,
+    )
+    report_console.print("[bold]Conda-build configuration files[/bold]")
     for filename in config.exclusive_config_files or []:
         path = Path(filename)
-        console.print(f"{path}:", markup=False, highlight=False)
+        report_console.print(Text(f"{path}:", style="bold blue"), soft_wrap=True)
         contents = path.read_text(encoding="utf-8")
-        console.print(
-            contents,
-            end="" if contents.endswith("\n") else "\n",
-            markup=False,
-            highlight=False,
+        report_console.print(
+            Syntax(
+                contents,
+                "yaml",
+                background_color="default",
+                word_wrap=False,
+            )
         )
 
 
@@ -739,30 +770,20 @@ def dag(
             if len(s) == 1:
                 singletons.extend(s)
                 continue
-            console.print(f"# subdag {i}", markup=False)
+            _write_output(f"# subdag {i}\n")
             subdag = dag.subgraph(s)
             recipes = [
                 recipe
                 for package in nx.topological_sort(subdag)
                 for recipe in name2recipes[package]
             ]
-            console.print(
-                "\n".join(map(os.fspath, recipes)) + "\n",
-                end="",
-                markup=False,
-                highlight=False,
-            )
+            _write_output("\n".join(map(os.fspath, recipes)) + "\n")
         if not hide_singletons:
-            console.print("# singletons", markup=False)
+            _write_output("# singletons\n")
             recipes = [
                 recipe for package in singletons for recipe in name2recipes[package]
             ]
-            console.print(
-                "\n".join(map(os.fspath, recipes)) + "\n",
-                end="",
-                markup=False,
-                highlight=False,
-            )
+            _write_output("\n".join(map(os.fspath, recipes)) + "\n")
 
 
 @app.command("dependent")
@@ -822,7 +843,7 @@ def dependent(
     pkgs = []
     for pkg in selected_packages:
         pkgs.extend(dependency_func(d, pkg))
-    console.print("\n".join(sorted(set(pkgs))), markup=False, highlight=False)
+    _write_output("\n".join(sorted(set(pkgs))) + "\n")
 
 
 @app.command("lint")
@@ -873,11 +894,7 @@ def lint(
     try:
         parsed_git_range = _parse_git_range_if_needed(git_range)
         if list_checks:
-            console.print(
-                "\n".join(str(check) for check in _lint.get_checks()),
-                markup=False,
-                highlight=False,
-            )
+            _write_output("\n".join(str(check) for check in _lint.get_checks()) + "\n")
             sys.exit(0)
         _validate_path_exists(recipe_folder)
         _validate_path_exists(config)
@@ -895,7 +912,7 @@ def lint(
         result = linter.lint(recipes, fix=try_fix)
         messages = linter.get_messages()
         if messages:
-            console.print(
+            report_console.print(
                 "The following problems have been found (visit https://bioconda.github.io/contributor/linting.html for details on the particular lints you get below.):\n"
             )
             table = Table(title="Lint results")
@@ -910,11 +927,11 @@ def lint(
                     str(msg.check),
                     msg.title,
                 )
-            console.print(table)
+            report_console.print(table)
         if not result:
-            console.print("All checks OK")
+            report_console.print("All checks OK")
         else:
-            err_console.print("Errors were found", style="red")
+            error_console.print("Errors were found", style="red")
             raise typer.Exit(1)
     except Exception:
         if _handle_pdb_exception("Lint", pdb):
@@ -1028,14 +1045,16 @@ def duplicates(
             remove_package(spec)
         elif url:
             if not strict_version and (not strict_build):
-                console.print(f"https://anaconda.org/{our_channel}/{spec[0]}")
-            console.print(
-                "https://anaconda.org/{}/{}/files?version={}".format(our_channel, *spec)
+                _write_output(f"https://anaconda.org/{our_channel}/{spec[0]}\n")
+            _write_output(
+                "https://anaconda.org/{}/{}/files?version={}\n".format(
+                    our_channel, *spec
+                )
             )
         else:
             table.add_row(*[str(part) for part in spec], ",".join(dup_channels))
     if not url:
-        console.print(table)
+        report_console.print(table)
 
 
 @app.command("update-pinning")
@@ -1156,17 +1175,17 @@ def update_pinning(
         stats_table.add_column("Count", justify="right")
         for key, value in stats.items():
             stats_table.add_row(str(key), str(value))
-        console.print(stats_table)
+        report_console.print(stats_table)
         if num_recipes_needing_bump > max_bumps:
-            console.print(
+            report_console.print(
                 f"Only bumped {max_bumps} out of {num_recipes_needing_bump} recipes that needed a build number bump."
             )
         if hadErrors:
-            console.print(
+            report_console.print(
                 f"{len(hadErrors)} packages produced an error in conda-build: {list(hadErrors)}"
             )
         if bumpErrors:
-            console.print(
+            report_console.print(
                 f"The build numbers in the following recipes could not be incremented: {list(bumpErrors)}"
             )
     except Exception:
@@ -1299,7 +1318,7 @@ def bioconductor_skeleton(
             except (OSError, RuntimeError, ValueError, requests.RequestException):
                 problems.append(k)
         if len(problems):
-            err_console.print(
+            error_console.print(
                 "The following recipes had problems and were not finished: {}".format(
                     ", ".join(problems)
                 ),
@@ -1323,7 +1342,7 @@ def bioconductor_skeleton(
             )
     else:
         raise typer.BadParameter("Either --packages or --update-all must be specified.")
-    err_console.print(
+    error_console.print(
         "Warning! Make sure to bump bioconductor-data-packages if needed!",
         style="yellow",
     )
@@ -1577,7 +1596,7 @@ def autobump(
             scanner.add(
                 autobump.ExcludeOtherChannel,
                 excluded_channels,
-                cache and cache + "_repodata.txt",
+                Path(f"{cache}_repodata.txt") if cache is not None else None,
             )
         # Test if due to pinnings, the package hash would change and a rebuild
         # has become necessary. If so, bump the buildnumber.
@@ -1890,17 +1909,18 @@ def list_build_failures(
         str, typer.Option("--channel", help="Channel with packages to check")
     ] = "bioconda",
     output_format: Annotated[
-        Literal["txt", "markdown"],
-        typer.Option("--output-format", help="Output format"),
-    ] = "txt",
+        Literal["table", "markdown"],
+        typer.Option(
+            "--output-format",
+            help="Human-readable Rich table or exact Markdown serialization.",
+        ),
+    ] = "table",
     link_prefix: Annotated[
         str, typer.Option("--link-prefix", help="Prefix for links to build failures")
     ] = "",
     git_range: GitRangeOpt = None,
 ) -> None:
     """List recipes with build failure records"""
-    from rich.markdown import Markdown
-
     from .build_failure import BUILD_FAILURE_COLUMNS, collect_build_failure_records
     from .config import load_config
 
@@ -1923,14 +1943,16 @@ def list_build_failures(
                 + " | ".join(str(row[column]) for column in BUILD_FAILURE_COLUMNS)
                 + " |"
             )
-        console.print(Markdown("\n".join(lines)))
+        # Markdown is a serialization format here, not terminal decoration.
+        # Write it verbatim so links and table delimiters survive redirection.
+        _write_output("\n".join(lines) + "\n")
     else:
         table = Table(title="Build failures")
         for column in BUILD_FAILURE_COLUMNS:
             table.add_column(column)
         for row in records:
             table.add_row(*[str(row[column]) for column in BUILD_FAILURE_COLUMNS])
-        console.print(table)
+        report_console.print(table)
 
 
 @app.command("bulk-trigger-ci")

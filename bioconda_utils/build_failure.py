@@ -5,7 +5,7 @@ import time
 from collections.abc import Iterator
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import networkx as nx
 import ruamel.yaml
@@ -27,12 +27,17 @@ from .githandler import BiocondaRepo, GitRange
 logger = logging.getLogger(__name__)
 
 
-def format_link(uri, fmt: str, prefix: str = "", label: str = ""):
+def format_link(
+    uri: str,
+    fmt: Literal["table", "markdown"],
+    prefix: str = "",
+    label: str = "",
+) -> str:
     if prefix:
         uri = f"{prefix}/{uri}"
     if fmt == "markdown":
         return f"[{label}]({uri})"
-    elif fmt == "txt":
+    elif fmt == "table":
         return uri
     else:
         raise ValueError(f"Invalid link format: {fmt}")
@@ -270,7 +275,7 @@ def collect_build_failure_records(
     recipe_folder: Path,
     config: dict[str, Any],
     channel: str,
-    link_fmt: str = "txt",
+    link_fmt: Literal["table", "markdown"] = "table",
     link_prefix: str = "",
     git_range: GitRange | None = None,
 ) -> list[dict[str, Any]]:

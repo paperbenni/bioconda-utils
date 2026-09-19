@@ -212,7 +212,11 @@ def setup_logger(
     rich_handler = RichHandler(
         console=err_console,
         rich_tracebacks=True,
-        markup=True,
+        # Log records contain recipe metadata and subprocess output, so they
+        # must always be treated as literal text.  Enabling markup globally
+        # makes bracketed output disappear and unmatched closing tags raise
+        # MarkupError from inside the logging handler.
+        markup=False,
         show_time=True,
         show_path=False,
         omit_repeated_times=False,
